@@ -8,27 +8,30 @@ on:
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+      LOCAL_CSV: data/output.csv
+
     steps:
-      - name: Checkout repo
+      - name: ✅ Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 🐍 Setup Python environment
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install requirements
+      - name: 📦 Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install nbconvert
 
-      - name: Execute notebook (üretir: data/output.csv)
+      - name: ⚙️ Execute notebook (creates data/output.csv)
         run: |
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb
 
-      - name: Upload to Hugging Face Dataset
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_DATASET_REPO: Caner7/pegos-stream
-          LOCAL_CSV: data/output.csv
+      - name: 📤 Upload to Hugging Face Dataset
         run: |
           python upload_to_hf.py
