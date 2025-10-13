@@ -1,1 +1,34 @@
-.github/workflows/
+name: Scheduled Data Fetch
+
+on:
+  schedule:
+    - cron: '0 6,10,14,18 * * *'   # UTC saatine göre (TR: 09:00, 13:00, 17:00, 21:00)
+  workflow_dispatch:
+
+jobs:
+  fetch_and_upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install requirements
+        run: |
+          pip install -r requirements.txt
+
+      - name: Execute notebook (üretir: data/output.csv)
+        run: |
+          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb
+
+      - name: Upload to Hugging Face Dataset
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET_REPO: Caner7/pegos-stream
+          LOCAL_CSV: data/output.csv
+        run: |
+          python upload_to_hf.py
