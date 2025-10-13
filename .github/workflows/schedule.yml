@@ -1,65 +1,72 @@
-name: Scheduled Data Fetch
+name: Pegos Live Data Fetch & Upload
 
 on:
   schedule:
-    - cron: '0 6,10,14,18 * * *'   # UTC -> Türkiye saatiyle 09:00, 13:00, 17:00, 21:00
-  workflow_dispatch:
+    - cron: "0 6,10,14,18 * * *"   # UTC saatine göre (TR: 09:00, 13:00, 17:00, 21:00)
+  workflow_dispatch:                # Manuel başlatma desteği
 
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+      TWITTER_USER: ${{ secrets.TWITTER_USER }}
+      TWITTER_PASS: ${{ secrets.TWITTER_PASS }}
+      KEEP_LAST: ${{ secrets.KEEP_LAST }}
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install requirements
+      - name: Install dependencies (Full)
         run: |
-          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          pip install --upgrade pip
+          pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests
 
-      # 🔍 DEBUG STEP — Env kontrolü
-      - name: Debug environment variables
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
-          TWITTER_USER: ${{ secrets.TWITTER_USER }}
-          KEEP_LAST: ${{ secrets.KEEP_LAST }}
+      # 🔍 DEBUG ADIMI — env değişkenleri ve HF bağlantı testi
+      - name: Debug environment variables & Hugging Face token check
         run: |
           echo "=== DEBUG ENVIRONMENT VARIABLES ==="
           echo "HF_DATASET_REPO=$HF_DATASET_REPO"
           echo "TWITTER_USER=$TWITTER_USER"
           echo "KEEP_LAST=$KEEP_LAST"
-          echo "Token length: ${#HF_TOKEN}"
+          echo "HF_TOKEN length: ${#HF_TOKEN}"
+          echo "------------------------------------"
+          echo "Checking Hugging Face Hub access..."
           python - <<'EOF'
 import os
 from huggingface_hub import HfApi
 try:
-    api = HfApi(token=os.getenv("HF_TOKEN"))
+    token = os.getenv("HF_TOKEN")
+    api = HfApi(token=token)
     user = api.whoami()
     print(f"✅ HF token valid. Logged in as: {user['name']}")
 except Exception as e:
-    print("❌ HF token invalid or cannot connect:", e)
+    print("❌ HF token invalid or connection failed:", e)
 EOF
+          echo "------------------------------------"
+          python -m pip show huggingface_hub || echo "huggingface_hub not found!"
           echo "===================================="
 
-      - name: Execute notebook (üretir: data/output.csv)
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
-          TWITTER_USER: ${{ secrets.TWITTER_USER }}
-          TWITTER_PASS: ${{ secrets.TWITTER_PASS }}
-          KEEP_LAST: ${{ secrets.KEEP_LAST }}
+      - name: Run scraper notebook (data.ipynb)
         run: |
-          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb
+          echo "🚀 Starting Pegos Data Pipeline..."
+          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
+          echo "✅ Notebook executed successfully"
 
-      - name: Upload to Hugging Face Dataset
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+      - name: Check notebook output
+        if: always()
         run: |
-          python upload_to_hf.py
+          echo "📘 Notebook execution finished."
+          echo "🔍 Showing last 40 lines of output.ipynb (for debug):"
+          tail -n 40 output.ipynb || echo "⚠️ No output file found."
