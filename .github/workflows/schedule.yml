@@ -1,37 +1,46 @@
-name: Scheduled Data Fetch
+name: Pegos Live Data Fetch & Upload
 
 on:
   schedule:
-    - cron: '0 6,10,14,18 * * *'   # UTC saatine göre (TR: 09:00, 13:00, 17:00, 21:00)
-  workflow_dispatch:
+    - cron: "0 6,10,14,18 * * *"  # UTC saatine göre (TR: 09:00, 13:00, 17:00, 21:00)
+  workflow_dispatch:              # Manuel tetikleme için
 
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
-      LOCAL_CSV: data/output.csv
+      TWITTER_USER: ${{ secrets.TWITTER_USER }}
+      TWITTER_PASS: ${{ secrets.TWITTER_PASS }}
+      KEEP_LAST: ${{ secrets.KEEP_LAST }}
 
     steps:
-      - name: ✅ Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Setup Python environment
+      - name: Set up Python environment
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip install nbconvert
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+          pip install selenium webdriver-manager beautifulsoup4 pandas huggingface_hub jupyter
 
-      - name: ⚙️ Execute notebook (creates data/output.csv)
+      - name: Run scraper notebook (data.ipynb)
         run: |
-          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb
+          echo "🚀 Starting Pegos Data Pipeline..."
+          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
+          echo "✅ Notebook executed successfully"
 
-      - name: 📤 Upload to Hugging Face Dataset
+      - name: Show result summary
+        if: always()
         run: |
-          python upload_to_hf.py
+          echo "📘 Notebook execution finished."
+          echo "🔍 Checking last lines of output..."
+          tail -n 30 output.ipynb || true
