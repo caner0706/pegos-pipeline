@@ -1,1 +1,4 @@
-
+jupyter
+pandas
+requests
+huggingface_hub
