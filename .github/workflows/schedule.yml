@@ -40,7 +40,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests
 
-      # DEBUG: Env ve HF token kontrolü (heredoc YOK)
+      # DEBUG: Env ve HF token kontrolü
       - name: Debug environment & HF token
         run: |
           set -e
@@ -71,7 +71,21 @@ jobs:
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
           echo "✅ Notebook executed successfully"
 
-      - name: List HF dataset files (simple python -c)
+      - name: Upload scraped data to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+        run: |
+          set -e
+          if [ -f "/tmp/pegos_output.csv" ]; then
+            echo "📤 Uploading CSV to Hugging Face..."
+            export LOCAL_CSV="/tmp/pegos_output.csv"
+            python upload_to_hf.py
+          else
+            echo "⚠️ No CSV file found at /tmp/pegos_output.csv — skipping upload."
+          fi
+
+      - name: List HF dataset files
         if: always()
         run: |
           python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); repo=os.getenv('HF_DATASET_REPO'); print('\n'.join(api.list_repo_files(repo_id=repo, repo_type='dataset')))"
