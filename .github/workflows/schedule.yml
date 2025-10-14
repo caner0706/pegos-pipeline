@@ -127,17 +127,17 @@ jobs:
           echo "✅ Cleaned dataset uploaded to HF."
 
       # ===========================
-      # 5️⃣ Model Prediction (LGBM + BERT)
+      # 5️⃣ Model Prediction (Hybrid: Direction + Price)
       # ===========================
-      - name: Run Pegos Prediction
+      - name: Run Pegos Hybrid Prediction
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🤖 Running Pegos prediction pipeline..."
+          echo "🤖 Running Pegos hybrid prediction pipeline..."
           python predict_with_model.py
-          echo "✅ Model predictions completed and uploaded to HF."
+          echo "✅ Hybrid model predictions completed and uploaded to HF (pred_label, pred_diff, predicted_price)."
 
       # ===========================
       # 6️⃣ HF dataset içeriğini listele
