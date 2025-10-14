@@ -21,7 +21,7 @@ jobs:
 
     steps:
       # ===========================
-      # 0️⃣ Repo ve Python kurulumu
+      # 0️⃣ Repo ve ortam kurulumu
       # ===========================
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Chrome & Python deps
+      - name: Install Chrome & dependencies
         run: |
           set -e
           sudo apt-get update
@@ -40,11 +40,15 @@ jobs:
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+
+      - name: Install Python dependencies
+        run: |
+          set -e
           python -m pip install --upgrade pip
-          pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests numpy torch transformers joblib lightgbm
+          pip install -r requirements.txt
 
       # ===========================
-      # DEBUG: Ortam ve token kontrolü
+      # DEBUG: Ortam & HF Token kontrol
       # ===========================
       - name: Debug environment & HF token
         run: |
