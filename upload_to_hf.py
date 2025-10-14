@@ -11,8 +11,8 @@ if HF_TOKEN is None:
     sys.exit(1)
 
 api = HfApi(token=HF_TOKEN)
-
 LOCAL_CSV = os.environ.get("LOCAL_CSV", "data/output.csv")
+
 if not os.path.exists(LOCAL_CSV):
     print(f"CSV not found: {LOCAL_CSV}")
     sys.exit(1)
@@ -20,7 +20,7 @@ if not os.path.exists(LOCAL_CSV):
 timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 basename = f"blockchain_tweets_{timestamp}.csv"
 
-# Arşiv dosyası (timestamp ile)
+# Arşiv dosyası
 api.upload_file(
     path_or_fileobj=LOCAL_CSV,
     path_in_repo=f"data/{basename}",
@@ -29,7 +29,7 @@ api.upload_file(
 )
 print("✅ Uploaded:", f"data/{basename}")
 
-# latest.csv olarak güncelle
+# En son veri
 api.upload_file(
     path_or_fileobj=LOCAL_CSV,
     path_in_repo="data/latest.csv",
@@ -37,4 +37,3 @@ api.upload_file(
     repo_type="dataset"
 )
 print("✅ Updated: data/latest.csv")
-
