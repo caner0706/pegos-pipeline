@@ -1,30 +1,32 @@
 # =====================================
-# Pegos Prediction Module (4-hour loop)
+# Pegos Hybrid Prediction Module (4-hour loop)
 # =====================================
 import os
 import joblib
 import torch
 import numpy as np
 import pandas as pd
+import requests
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModel
-from huggingface_hub import HfApi, hf_hub_download, upload_file
+from huggingface_hub import hf_hub_download, upload_file
 
 # 🔐 Ortam değişkenleri (GitHub Secrets)
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "Caner7/pegos-stream")
 
-print("🤖 Running Pegos prediction pipeline...")
+print("🤖 Running Pegos hybrid prediction pipeline...")
 
 # ===================================================
 # 1️⃣ Model, scaler ve tokenizer yükleme
 # ===================================================
 try:
-    print("📦 Loading model and scaler...")
-    model = joblib.load("pegos_lightgbm.pkl")
+    print("📦 Loading models and scaler...")
+    clf_model = joblib.load("pegos_lightgbm.pkl")
+    reg_model = joblib.load("pegos_regressor.pkl")
     scaler = joblib.load("scaler.pkl")
 except Exception as e:
-    print(f"❌ Model/Scaler load error: {e}")
+    print(f"❌ Model load error: {e}")
     exit(0)
 
 try:
@@ -69,10 +71,7 @@ def get_bert_embeddings(texts, tokenizer, model, batch_size=16, device="cpu"):
     with torch.no_grad():
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            tokens = tokenizer(
-                batch, padding=True, truncation=True,
-                max_length=128, return_tensors="pt"
-            ).to(device)
+            tokens = tokenizer(batch, padding=True, truncation=True, max_length=128, return_tensors="pt").to(device)
             outputs = model(**tokens)
             cls_embeds = outputs.last_hidden_state[:, 0, :].cpu().numpy()
             all_embeds.append(cls_embeds)
@@ -85,7 +84,6 @@ try:
     df = df.dropna(subset=["tweet"])
     texts = df["tweet"].astype(str).tolist()
 
-    # ✅ Sadece modelin beklediği 4 sütun
     expected_cols = ["comment", "retweet", "like", "see_count"]
     for col in expected_cols:
         if col not in df.columns:
@@ -101,13 +99,25 @@ except Exception as e:
     exit(0)
 
 # ===================================================
-# 5️⃣ Tahmin üretimi
+# 5️⃣ Tahmin üretimi (yön + fiyat farkı)
 # ===================================================
 try:
-    print("🤖 Predicting market direction...")
-    df["pred_label"] = model.predict(X_all)
-    df["pred_proba"] = model.predict_proba(X_all)[:, 1]
+    print("📈 Predicting direction and price difference...")
+    df["pred_label"] = clf_model.predict(X_all)
+    df["pred_proba"] = clf_model.predict_proba(X_all)[:, 1]
+    df["pred_diff"] = reg_model.predict(X_all)
     df["prediction"] = df["pred_label"].map({1: "📈 YÜKSELİŞ", 0: "📉 DÜŞÜŞ"})
+
+    # Güncel BTC fiyatı
+    try:
+        resp = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
+        current_price = resp.json()["bitcoin"]["usd"]
+    except Exception:
+        current_price = np.nan
+
+    df["current_price"] = current_price
+    df["predicted_price"] = current_price + df["pred_diff"]
+
     print(f"✅ Predictions completed for {len(df)} records.")
 except Exception as e:
     print(f"⚠️ Prediction error: {e}")
@@ -124,29 +134,12 @@ df.to_csv(output_latest, index=False)
 df.to_csv(output_time, index=False)
 print(f"💾 Predictions saved locally to {output_latest}")
 
-# Hugging Face’e yükle
 try:
     print("🚀 Uploading predictions to Hugging Face...")
-    upload_file(
-        path_or_fileobj=output_latest,
-        path_in_repo="data/predictions_latest.csv",
-        repo_id=HF_DATASET_REPO,
-        repo_type="dataset",
-        token=HF_TOKEN,
-        commit_message=f"Upload latest predictions ({timestamp})"
-    )
-
-    upload_file(
-        path_or_fileobj=output_time,
-        path_in_repo=f"data/predictions_{timestamp}.csv",
-        repo_id=HF_DATASET_REPO,
-        repo_type="dataset",
-        token=HF_TOKEN,
-        commit_message=f"Upload timestamped predictions ({timestamp})"
-    )
-
-    print("✅ Predictions uploaded to HF successfully.")
-except Exception as e:
-    print(f"⚠️ Upload failed: {e}")
-
-print("🎯 Prediction workflow completed (tolerant, non-blocking).")
+    for path_in_repo, file_path in {
+        "data/predictions_latest.csv": output_latest,
+        f"data/predictions_{timestamp}.csv": output_time
+    }.items():
+        upload_file(
+            path_or_fileobj=file_path,
+           
