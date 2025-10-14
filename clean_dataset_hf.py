@@ -1,8 +1,9 @@
 # =====================================================
-# Pegos Dataset Cleaning Script 🧹
+# Pegos Dataset Cleaning Script (Safe Version) 🧹
 # =====================================================
 import os
 import pandas as pd
+import numpy as np
 from huggingface_hub import HfApi, hf_hub_download
 
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -35,9 +36,8 @@ columns_needed = [
     "close",
     "diff",
 ]
-df = df[[c for c in columns_needed if c in df.columns]]
+df = df[[c for c in columns_needed if c in df.columns]].copy()
 
-# Sütun isimlerini Türkçe'ye çevir
 df.rename(columns={
     "open": "Açılış Fiyatı (USD)",
     "close": "Kapanış Fiyatı (USD)",
@@ -45,37 +45,43 @@ df.rename(columns={
 }, inplace=True)
 
 # -----------------------------
-# 2️⃣ Yinelenen verileri kaldır
+# 2️⃣ Yinelenen veriler kaldır
 # -----------------------------
 before = len(df)
 df.drop_duplicates(subset=["tweet", "time"], inplace=True)
-after = len(df)
-print(f"🧩 Yinelenen veriler kaldırıldı: {before - after} satır silindi.")
+print(f"🧩 Yinelenen veriler kaldırıldı: {before - len(df)} satır silindi.")
 
 # -----------------------------
 # 3️⃣ Eksik değerleri temizle
 # -----------------------------
-missing_before = df.isnull().sum().sum()
+before = len(df)
 df.dropna(subset=["tweet", "Açılış Fiyatı (USD)", "Kapanış Fiyatı (USD)"], inplace=True)
-missing_after = df.isnull().sum().sum()
-print(f"🚿 Eksik değer temizliği tamamlandı. {missing_before - missing_after} boş alan temizlendi.")
+print(f"🚿 Eksik değer temizliği: {before - len(df)} satır silindi.")
 
 # -----------------------------
-# 4️⃣ Aykırı değer analizi (Z-score)
+# 4️⃣ Aykırı değer analizi (soft filter)
 # -----------------------------
-import numpy as np
-for col in ["comment", "retweet", "like", "see_count", "Fark (USD)"]:
+def soft_outlier_filter(series):
+    q1 = series.quantile(0.01)
+    q3 = series.quantile(0.99)
+    return series.between(q1, q3)
+
+numeric_cols = ["comment", "retweet", "like", "see_count", "Fark (USD)"]
+before = len(df)
+for col in numeric_cols:
     if col in df.columns:
-        z = np.abs((df[col] - df[col].mean()) / df[col].std())
-        outliers = (z > 3).sum()
-        df = df[z <= 3]
-        print(f"⚠️ {col} sütununda {outliers} aykırı değer çıkarıldı.")
+        mask = soft_outlier_filter(df[col])
+        removed = (~mask).sum()
+        df = df[mask]
+        print(f"⚖️ {col} sütununda {removed} uç değer kaldırıldı.")
+print(f"📉 Aykırı değer temizliği sonrası toplam {before - len(df)} satır silindi.")
 
 # -----------------------------
-# 5️⃣ Tarih formatı düzelt
+# 5️⃣ Tarih formatı kontrolü
 # -----------------------------
 df["time"] = pd.to_datetime(df["time"], errors="coerce")
-df.dropna(subset=["time"], inplace=True)
+df = df.dropna(subset=["time"])
+df = df[df["time"] > "2020-01-01"]
 
 # -----------------------------
 # 6️⃣ Sonuçları kaydet
@@ -84,7 +90,9 @@ output_path = "/tmp/pegos_cleaned_dataset.csv"
 df.to_csv(output_path, index=False)
 print(f"💾 Temizlenmiş veri kaydedildi: {output_path} ({len(df)} satır)")
 
-# Hugging Face'e yükle
+# -----------------------------
+# 7️⃣ Hugging Face'e yükle
+# -----------------------------
 api.upload_file(
     path_or_fileobj=output_path,
     path_in_repo="data/latest_cleaned.csv",
