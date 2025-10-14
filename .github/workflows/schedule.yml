@@ -18,15 +18,15 @@ jobs:
       KEEP_LAST: ${{ secrets.KEEP_LAST }}
 
     steps:
-      - name: 📦 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: 🧩 Install Chrome & dependencies
+      - name: Install Chrome & Python deps
         run: |
           set -e
           sudo apt-get update
@@ -38,7 +38,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests
 
-      - name: 🔍 Debug environment & Hugging Face auth
+      # DEBUG: Env ve HF token kontrolü (heredoc YOK)
+      - name: Debug environment & HF token
         run: |
           set -e
           echo "=== DEBUG ENV ==="
@@ -49,19 +50,10 @@ jobs:
           echo "huggingface_hub version:"
           python -m pip show huggingface_hub || true
           echo "HF whoami check:"
-          python - <<'PY'
-import os
-from huggingface_hub import HfApi
-try:
-    api = HfApi(token=os.getenv("HF_TOKEN"))
-    who = api.whoami()
-    print("✅ Logged in as:", who.get("name"))
-except Exception as e:
-    print("❌ HF login check failed:", e)
-PY
+          python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); print('OK:', bool(api.whoami()))"
           echo "=================="
 
-      - name: 🚀 Run Pegos data scraper (data.ipynb)
+      - name: Run scraper notebook (data.ipynb)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
@@ -74,30 +66,12 @@ PY
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
           echo "✅ Notebook executed successfully"
 
-      - name: 🧾 Debug Hugging Face dataset contents
+      - name: List HF dataset files (simple python -c)
         if: always()
         run: |
-          echo "🔍 Listing files in Hugging Face dataset..."
-          python - <<'PY'
-import os
-from huggingface_hub import HfApi
-api = HfApi(token=os.getenv("HF_TOKEN"))
-repo = os.getenv("HF_DATASET_REPO")
-try:
-    files = api.list_repo_files(repo_id=repo, repo_type="dataset")
-    if files:
-        print("📂 Files in dataset:")
-        for f in files:
-            print(" -", f)
-    else:
-        print("⚠️ No files found in dataset.")
-except Exception as e:
-    print("❌ Error listing files:", e)
-PY
+          python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); repo=os.getenv('HF_DATASET_REPO'); print('\n'.join(api.list_repo_files(repo_id=repo, repo_type='dataset')))"
 
-      - name: 📘 Post-run log summary
+      - name: Show workspace files
         if: always()
         run: |
-          echo "📘 Notebook execution finished."
-          echo "🔍 Checking output presence:"
-          ls -lah | grep output || echo "⚠️ output.ipynb not found"
+          ls -lah
