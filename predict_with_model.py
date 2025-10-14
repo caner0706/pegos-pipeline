@@ -17,7 +17,7 @@ HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "Caner7/pegos-stream")
 print("🤖 Running Pegos prediction pipeline...")
 
 # ===================================================
-# 1️⃣ Model, scaler ve tokenizer yükleme (try/except)
+# 1️⃣ Model, scaler ve tokenizer yükleme
 # ===================================================
 try:
     print("📦 Loading model and scaler...")
@@ -25,7 +25,6 @@ try:
     scaler = joblib.load("scaler.pkl")
 except Exception as e:
     print(f"❌ Model/Scaler load error: {e}")
-    print("➡️ Skipping this prediction cycle.")
     exit(0)
 
 try:
@@ -55,24 +54,24 @@ try:
     print(f"✅ Loaded {len(df)} rows, {df.shape[1]} columns.")
 except Exception as e:
     print(f"⚠️ Failed to download dataset: {e}")
-    print("➡️ Skipping this prediction cycle.")
     exit(0)
 
 if df.empty:
-    print("⚠️ Dataset is empty — skipping.")
+    print("⚠️ Dataset is empty — skipping this cycle.")
     exit(0)
 
 # ===================================================
-# 3️⃣ Embedding çıkarma fonksiyonu
+# 3️⃣ BERT embedding fonksiyonu
 # ===================================================
 def get_bert_embeddings(texts, tokenizer, model, batch_size=16, device="cpu"):
     model.to(device)
     all_embeds = []
     with torch.no_grad():
         for i in range(0, len(texts), batch_size):
-            batch = texts[i:i+batch_size]
+            batch = texts[i:i + batch_size]
             tokens = tokenizer(
-                batch, padding=True, truncation=True, max_length=128, return_tensors="pt"
+                batch, padding=True, truncation=True,
+                max_length=128, return_tensors="pt"
             ).to(device)
             outputs = model(**tokens)
             cls_embeds = outputs.last_hidden_state[:, 0, :].cpu().numpy()
@@ -80,22 +79,22 @@ def get_bert_embeddings(texts, tokenizer, model, batch_size=16, device="cpu"):
     return np.vstack(all_embeds)
 
 # ===================================================
-# 4️⃣ Veri hazırlığı (tweet + numerik)
+# 4️⃣ Özellik hazırlığı
 # ===================================================
 try:
     df = df.dropna(subset=["tweet"])
     texts = df["tweet"].astype(str).tolist()
 
-    numeric_cols = [
-        "comment", "retweet", "like", "see_count"
-    ]
-    for col in numeric_cols:
+    # ✅ Sadece modelin beklediği 4 sütun
+    expected_cols = ["comment", "retweet", "like", "see_count"]
+    for col in expected_cols:
         if col not in df.columns:
-            df[col] = 0  # Eksik sütun varsa doldur
+            df[col] = 0
+
+    X_num = scaler.transform(df[expected_cols].fillna(0))
 
     print("🧠 Generating BERT embeddings...")
     X_text = get_bert_embeddings(texts, tokenizer, bert_model, device=device)
-    X_num = scaler.transform(df[numeric_cols].fillna(0))
     X_all = np.hstack([X_text, X_num])
 except Exception as e:
     print(f"⚠️ Feature preparation error: {e}")
@@ -115,15 +114,17 @@ except Exception as e:
     exit(0)
 
 # ===================================================
-# 6️⃣ Sonuçları kaydet ve Hugging Face’e yükle
+# 6️⃣ Kaydet ve Hugging Face’e yükle
 # ===================================================
 timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 output_latest = "/tmp/predictions_latest.csv"
 output_time = f"/tmp/predictions_{timestamp}.csv"
+
 df.to_csv(output_latest, index=False)
 df.to_csv(output_time, index=False)
 print(f"💾 Predictions saved locally to {output_latest}")
 
+# Hugging Face’e yükle
 try:
     print("🚀 Uploading predictions to Hugging Face...")
     upload_file(
@@ -134,6 +135,7 @@ try:
         token=HF_TOKEN,
         commit_message=f"Upload latest predictions ({timestamp})"
     )
+
     upload_file(
         path_or_fileobj=output_time,
         path_in_repo=f"data/predictions_{timestamp}.csv",
@@ -142,6 +144,7 @@ try:
         token=HF_TOKEN,
         commit_message=f"Upload timestamped predictions ({timestamp})"
     )
+
     print("✅ Predictions uploaded to HF successfully.")
 except Exception as e:
     print(f"⚠️ Upload failed: {e}")
