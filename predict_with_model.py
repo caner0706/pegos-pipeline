@@ -134,12 +134,29 @@ df.to_csv(output_latest, index=False)
 df.to_csv(output_time, index=False)
 print(f"💾 Predictions saved locally to {output_latest}")
 
+# Hugging Face’e yükle
 try:
     print("🚀 Uploading predictions to Hugging Face...")
-    for path_in_repo, file_path in {
-        "data/predictions_latest.csv": output_latest,
-        f"data/predictions_{timestamp}.csv": output_time
-    }.items():
-        upload_file(
-            path_or_fileobj=file_path,
+
+    upload_file(
+        path_or_fileobj=output_latest,
+        path_in_repo="data/predictions_latest.csv",
+        repo_id=HF_DATASET_REPO,
+        repo_type="dataset",
+        token=HF_TOKEN,
+        commit_message=f"Upload latest predictions ({timestamp})"
+    )
+
+    upload_file(
+        path_or_fileobj=output_time,
+        path_in_repo=f"data/predictions_{timestamp}.csv",
+        repo_id=HF_DATASET_REPO,
+        repo_type="dataset",
+        token=HF_TOKEN,
+        commit_message=f"Upload timestamped predictions ({timestamp})"
+    )
+
+    print("✅ Predictions uploaded to HF successfully.")
+except Exception as e:
+    print(f"⚠️ Upload failed: {e}")
            
