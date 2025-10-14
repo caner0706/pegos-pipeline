@@ -11,6 +11,8 @@ jobs:
     timeout-minutes: 35
 
     env:
+      AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+      CT0: ${{ secrets.CT0 }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
       TWITTER_USER: ${{ secrets.TWITTER_USER }}
