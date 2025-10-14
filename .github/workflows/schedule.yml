@@ -1,4 +1,4 @@
-name: Pegos Live Data Fetch & Upload
+name: Pegos Live Data Fetch & Predict
 
 on:
   schedule:
@@ -8,7 +8,7 @@ on:
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
 
     env:
       AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
@@ -41,7 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
           python -m pip install --upgrade pip
-          pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests numpy
+          pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests numpy torch transformers joblib lightgbm
 
       # ===========================
       # DEBUG: Ortam ve token kontrolü
@@ -123,7 +123,20 @@ jobs:
           echo "✅ Cleaned dataset uploaded to HF."
 
       # ===========================
-      # 5️⃣ HF dataset içeriğini listele
+      # 5️⃣ Model Prediction (LGBM + BERT)
+      # ===========================
+      - name: Run Pegos Prediction
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+        run: |
+          set -e
+          echo "🤖 Running Pegos prediction pipeline..."
+          python predict_with_model.py
+          echo "✅ Model predictions completed and uploaded to HF."
+
+      # ===========================
+      # 6️⃣ HF dataset içeriğini listele
       # ===========================
       - name: List HF dataset files
         if: always()
@@ -131,7 +144,7 @@ jobs:
           python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); repo=os.getenv('HF_DATASET_REPO'); print('\n'.join(api.list_repo_files(repo_id=repo, repo_type='dataset')))"
 
       # ===========================
-      # 6️⃣ Workspace dosyaları
+      # 7️⃣ Workspace dosyaları
       # ===========================
       - name: Show workspace files
         if: always()
@@ -139,7 +152,7 @@ jobs:
           ls -lah
 
       # ===========================
-      # 7️⃣ Notebook çıktı özeti
+      # 8️⃣ Notebook çıktı özeti
       # ===========================
       - name: Show notebook output summary
         if: always()
