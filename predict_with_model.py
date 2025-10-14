@@ -87,8 +87,7 @@ try:
     texts = df["tweet"].astype(str).tolist()
 
     numeric_cols = [
-        "comment", "retweet", "like", "see_count",
-        "Açılış Fiyatı (USD)", "Kapanış Fiyatı (USD)", "Fark (USD)"
+        "comment", "retweet", "like", "see_count"
     ]
     for col in numeric_cols:
         if col not in df.columns:
