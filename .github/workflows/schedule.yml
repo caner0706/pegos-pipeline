@@ -8,7 +8,7 @@ on:
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     env:
       AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
@@ -20,6 +20,9 @@ jobs:
       KEEP_LAST: ${{ secrets.KEEP_LAST }}
 
     steps:
+      # ===========================
+      # 0️⃣ Repo ve Python kurulumu
+      # ===========================
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -38,9 +41,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
           python -m pip install --upgrade pip
-          pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests
+          pip install jupyter selenium webdriver-manager beautifulsoup4 pandas huggingface_hub requests numpy
 
-      # DEBUG: Env ve HF token kontrolü
+      # ===========================
+      # DEBUG: Ortam ve token kontrolü
+      # ===========================
       - name: Debug environment & HF token
         run: |
           set -e
@@ -56,7 +61,9 @@ jobs:
           python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); print('OK:', bool(api.whoami()))"
           echo "=================="
 
+      # ===========================
       # 1️⃣ Tweet scraping (Notebook)
+      # ===========================
       - name: Run scraper notebook (data.ipynb)
         env:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
@@ -72,7 +79,9 @@ jobs:
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
           echo "✅ Notebook executed successfully"
 
+      # ===========================
       # 2️⃣ Hugging Face'e tweet upload
+      # ===========================
       - name: Upload scraped data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -87,7 +96,9 @@ jobs:
             echo "⚠️ No CSV file found at /tmp/pegos_output.csv — skipping upload."
           fi
 
+      # ===========================
       # 3️⃣ Tweet + BTC verisi birleştirme
+      # ===========================
       - name: Merge and upload full dataset (tweets + BTC)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -98,19 +109,38 @@ jobs:
           python build_dataset_hf.py
           echo "✅ Merged dataset uploaded to HF."
 
-      # 4️⃣ HF dataset içeriğini listele
+      # ===========================
+      # 4️⃣ Temizleme (duplicate / outlier)
+      # ===========================
+      - name: Clean merged dataset (remove duplicates/outliers)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+        run: |
+          set -e
+          echo "🧹 Cleaning merged dataset..."
+          python clean_dataset_hf.py
+          echo "✅ Cleaned dataset uploaded to HF."
+
+      # ===========================
+      # 5️⃣ HF dataset içeriğini listele
+      # ===========================
       - name: List HF dataset files
         if: always()
         run: |
           python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); repo=os.getenv('HF_DATASET_REPO'); print('\n'.join(api.list_repo_files(repo_id=repo, repo_type='dataset')))"
 
-      # 5️⃣ Workspace kontrol
+      # ===========================
+      # 6️⃣ Workspace dosyaları
+      # ===========================
       - name: Show workspace files
         if: always()
         run: |
           ls -lah
 
-      # 6️⃣ Notebook çıktı özeti
+      # ===========================
+      # 7️⃣ Notebook çıktı özeti
+      # ===========================
       - name: Show notebook output summary
         if: always()
         run: |
