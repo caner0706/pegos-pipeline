@@ -46,7 +46,8 @@ jobs:
           set -e
           echo "=== DEBUG ENV ==="
           echo "HF_DATASET_REPO=${HF_DATASET_REPO}"
-          echo "TWITTER_USER=${TWITTER_USER}"
+          echo "AUTH_TOKEN length: ${#AUTH_TOKEN}"
+          echo "CT0 length: ${#CT0}"
           echo "KEEP_LAST=${KEEP_LAST}"
           echo "HF_TOKEN length: ${#HF_TOKEN}"
           echo "huggingface_hub version:"
@@ -57,6 +58,8 @@ jobs:
 
       - name: Run scraper notebook (data.ipynb)
         env:
+          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+          CT0: ${{ secrets.CT0 }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           TWITTER_USER: ${{ secrets.TWITTER_USER }}
