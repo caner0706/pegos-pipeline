@@ -75,3 +75,9 @@ jobs:
         if: always()
         run: |
           ls -lah
+
+      - name: Show notebook output summary
+        if: always()
+        run: |
+          echo "📜 Showing notebook text output (first 200 lines):"
+          head -n 200 output.ipynb | sed 's/\\n/\n/g' | grep -E "✅|⚠️|❌|tweet|Upload|Total" || true
