@@ -1,4 +1,13 @@
 jupyter
+selenium
+webdriver-manager
+beautifulsoup4
 pandas
-requests
 huggingface_hub
+requests
+numpy
+torch
+transformers
+joblib
+lightgbm
+scikit-learn
