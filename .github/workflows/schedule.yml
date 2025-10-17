@@ -8,7 +8,7 @@ on:
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 50
 
     env:
       AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
@@ -35,7 +35,7 @@ jobs:
         run: |
           set -e
           sudo apt-get update
-          sudo apt-get install -y wget gnupg unzip
+          sudo apt-get install -y wget gnupg
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
@@ -46,7 +46,6 @@ jobs:
           set -e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install jupyter huggingface_hub==0.23.3 transformers==4.44.0 torch
 
       # ===========================
       # DEBUG: Ortam & HF Token kontrol
@@ -63,12 +62,7 @@ jobs:
           echo "huggingface_hub version:"
           python -m pip show huggingface_hub || true
           echo "HF whoami check:"
-          python - <<'PYCODE'
-          import os
-          from huggingface_hub import HfApi
-          api = HfApi(token=os.getenv("HF_TOKEN"))
-          print("✅ HF Authenticated:", bool(api.whoami()))
-          PYCODE
+          python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); print('OK:', bool(api.whoami()))"
           echo "=================="
 
       # ===========================
@@ -86,12 +80,11 @@ jobs:
         run: |
           set -e
           echo "🚀 Starting Pegos Twitter Scraper..."
-          mkdir -p /tmp/data/$(date +'%Y-%m-%d')
-          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=2400
+          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
           echo "✅ Notebook executed successfully"
 
       # ===========================
-      # 2️⃣ Hugging Face'e tweet upload
+      # 2️⃣ Hugging Face'e tweet upload (daily folder)
       # ===========================
       - name: Upload scraped data to Hugging Face (daily folder)
         env:
@@ -99,13 +92,14 @@ jobs:
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          export TODAY=$(date +'%Y-%m-%d')
-          if [ -f "/tmp/pegos_output.csv" ]; then
+          TODAY=$(date +'%Y-%m-%d')
+          CSV_PATH="/tmp/data/${TODAY}/pegos_output.csv"
+          if [ -f "$CSV_PATH" ]; then
             echo "📤 Uploading CSV for $TODAY..."
-            export LOCAL_CSV="/tmp/pegos_output.csv"
+            export LOCAL_CSV="$CSV_PATH"
             python upload_to_hf.py
           else
-            echo "⚠️ No CSV file found — skipping upload."
+            echo "⚠️ No CSV file found at $CSV_PATH — skipping upload."
           fi
 
       # ===========================
@@ -145,7 +139,7 @@ jobs:
           set -e
           echo "🤖 Running Pegos hybrid prediction pipeline..."
           python predict_with_model.py
-          echo "✅ Hybrid model predictions completed and uploaded to HF."
+          echo "✅ Hybrid model predictions completed and uploaded to HF (pred_label, pred_diff, predicted_price)."
 
       # ===========================
       # 6️⃣ HF dataset içeriğini listele
@@ -154,15 +148,15 @@ jobs:
         if: always()
         run: |
           python - <<'PYCODE'
-          import os
-          from huggingface_hub import HfApi
-          api = HfApi(token=os.getenv("HF_TOKEN"))
-          repo = os.getenv("HF_DATASET_REPO")
-          print("📂 Hugging Face dataset file list:")
-          for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
-              if "data/" in f:
-          print(" -", f)
-          PYCODE
+import os
+from huggingface_hub import HfApi
+api = HfApi(token=os.getenv("HF_TOKEN"))
+repo = os.getenv("HF_DATASET_REPO")
+print("📂 Hugging Face dataset file list:")
+for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
+    if "data/" in f:
+        print(" -", f)
+PYCODE
 
       # ===========================
       # 7️⃣ Workspace dosyaları
@@ -170,8 +164,9 @@ jobs:
       - name: Show workspace files
         if: always()
         run: |
-          echo "📁 Workspace content:"
+          ls -lah /tmp || true
           ls -lah /tmp/data || true
+          echo "📁 Temporary data folder structure displayed."
 
       # ===========================
       # 8️⃣ Notebook çıktı özeti
