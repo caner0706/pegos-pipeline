@@ -154,15 +154,15 @@ jobs:
         if: always()
         run: |
           python - <<'PYCODE'
-import os
-from huggingface_hub import HfApi
-api = HfApi(token=os.getenv("HF_TOKEN"))
-repo = os.getenv("HF_DATASET_REPO")
-print("📂 Hugging Face dataset file list:")
-for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
-    if "data/" in f:
-        print(" -", f)
-PYCODE
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.getenv("HF_TOKEN"))
+          repo = os.getenv("HF_DATASET_REPO")
+          print("📂 Hugging Face dataset file list:")
+          for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
+              if "data/" in f:
+          print(" -", f)
+          PYCODE
 
       # ===========================
       # 7️⃣ Workspace dosyaları
