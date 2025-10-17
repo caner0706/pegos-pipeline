@@ -8,7 +8,7 @@ on:
 jobs:
   fetch_and_upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
 
     env:
       AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
@@ -35,7 +35,7 @@ jobs:
         run: |
           set -e
           sudo apt-get update
-          sudo apt-get install -y wget gnupg
+          sudo apt-get install -y wget gnupg unzip
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
@@ -46,6 +46,7 @@ jobs:
           set -e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install jupyter huggingface_hub==0.23.3 transformers==4.44.0 torch
 
       # ===========================
       # DEBUG: Ortam & HF Token kontrol
@@ -62,7 +63,12 @@ jobs:
           echo "huggingface_hub version:"
           python -m pip show huggingface_hub || true
           echo "HF whoami check:"
-          python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); print('OK:', bool(api.whoami()))"
+          python - <<'PYCODE'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.getenv("HF_TOKEN"))
+          print("✅ HF Authenticated:", bool(api.whoami()))
+          PYCODE
           echo "=================="
 
       # ===========================
@@ -80,24 +86,26 @@ jobs:
         run: |
           set -e
           echo "🚀 Starting Pegos Twitter Scraper..."
-          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
+          mkdir -p /tmp/data/$(date +'%Y-%m-%d')
+          jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=2400
           echo "✅ Notebook executed successfully"
 
       # ===========================
       # 2️⃣ Hugging Face'e tweet upload
       # ===========================
-      - name: Upload scraped data to Hugging Face
+      - name: Upload scraped data to Hugging Face (daily folder)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
+          export TODAY=$(date +'%Y-%m-%d')
           if [ -f "/tmp/pegos_output.csv" ]; then
-            echo "📤 Uploading CSV to Hugging Face..."
+            echo "📤 Uploading CSV for $TODAY..."
             export LOCAL_CSV="/tmp/pegos_output.csv"
             python upload_to_hf.py
           else
-            echo "⚠️ No CSV file found at /tmp/pegos_output.csv — skipping upload."
+            echo "⚠️ No CSV file found — skipping upload."
           fi
 
       # ===========================
@@ -137,7 +145,7 @@ jobs:
           set -e
           echo "🤖 Running Pegos hybrid prediction pipeline..."
           python predict_with_model.py
-          echo "✅ Hybrid model predictions completed and uploaded to HF (pred_label, pred_diff, predicted_price)."
+          echo "✅ Hybrid model predictions completed and uploaded to HF."
 
       # ===========================
       # 6️⃣ HF dataset içeriğini listele
@@ -145,7 +153,16 @@ jobs:
       - name: List HF dataset files
         if: always()
         run: |
-          python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); repo=os.getenv('HF_DATASET_REPO'); print('\n'.join(api.list_repo_files(repo_id=repo, repo_type='dataset')))"
+          python - <<'PYCODE'
+import os
+from huggingface_hub import HfApi
+api = HfApi(token=os.getenv("HF_TOKEN"))
+repo = os.getenv("HF_DATASET_REPO")
+print("📂 Hugging Face dataset file list:")
+for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
+    if "data/" in f:
+        print(" -", f)
+PYCODE
 
       # ===========================
       # 7️⃣ Workspace dosyaları
@@ -153,7 +170,8 @@ jobs:
       - name: Show workspace files
         if: always()
         run: |
-          ls -lah
+          echo "📁 Workspace content:"
+          ls -lah /tmp/data || true
 
       # ===========================
       # 8️⃣ Notebook çıktı özeti
