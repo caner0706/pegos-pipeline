@@ -1,49 +1,62 @@
-# build_dataset_hf.py
+# =====================================================
+# Pegos Daily Dataset Builder (tweets + BTC merge)
+# =====================================================
 import os
 import time
 import pandas as pd
 import requests
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from huggingface_hub import HfApi, hf_hub_download
 
+# ------------------------------------------
+# Ortam değişkenleri
+# ------------------------------------------
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
+if not HF_TOKEN or not HF_DATASET_REPO:
+    raise RuntimeError("❌ HF_TOKEN veya HF_DATASET_REPO tanımlı değil!")
 
 api = HfApi(token=HF_TOKEN)
 
-# 1️⃣ Hugging Face'ten CSV'leri indir
-print("📥 HF dataset indiriliyor...")
+# ------------------------------------------
+# Günlük veriyi bul (en yeni gün klasörü)
+# ------------------------------------------
+print("📂 Hugging Face'ten günlük klasörler listeleniyor...")
 files = api.list_repo_files(repo_id=HF_DATASET_REPO, repo_type="dataset")
-csv_files = [f for f in files if f.endswith(".csv") and "blockchain_tweets_" in f]
+daily_folders = sorted(
+    list({f.split("/")[1] for f in files if f.startswith("data/") and len(f.split("/")) > 2})
+)
+if not daily_folders:
+    raise RuntimeError("❌ Günlük klasör bulunamadı!")
 
-if not csv_files:
-    raise RuntimeError("❌ HF üzerinde blockchain CSV dosyası bulunamadı.")
+latest_day = daily_folders[-1]
+print(f"📅 En güncel veri klasörü: {latest_day}")
 
-local_paths = []
-for f in csv_files:
-    path = hf_hub_download(repo_id=HF_DATASET_REPO, filename=f, repo_type="dataset", token=HF_TOKEN)
-    local_paths.append(path)
-    print(f"✅ {f} indirildi.")
+latest_file = f"data/{latest_day}/latest.csv"
+print(f"📥 Günlük veri indiriliyor: {latest_file}")
 
-# 2️⃣ CSV'leri birleştir
-dfs = [pd.read_csv(p) for p in local_paths]
-merged = pd.concat(dfs, ignore_index=True)
-merged.drop_duplicates(subset=["tweet", "time"], inplace=True)
-merged["time"] = pd.to_datetime(merged["time"], errors="coerce", utc=True)
-merged["day"] = merged["time"].dt.date
-print(f"✅ {len(merged)} tweet birleştirildi.")
+# Hugging Face'ten indir
+local_path = hf_hub_download(
+    repo_id=HF_DATASET_REPO,
+    filename=latest_file,
+    repo_type="dataset",
+    token=HF_TOKEN,
+)
 
-# 3️⃣ Günleri al
-unique_days = merged["day"].dropna().drop_duplicates().sort_values().tolist()
+df = pd.read_csv(local_path)
+print(f"✅ {len(df)} tweet yüklendi.")
 
-# 4️⃣ BTC fiyatlarını CoinGecko'dan al
+# ------------------------------------------
+# BTC fiyatlarını CoinGecko’dan al
+# ------------------------------------------
 def get_btc_prices(day):
     base = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range"
-    start = int(datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc).timestamp())
-    end = int(datetime.combine(day, datetime.max.time(), tzinfo=timezone.utc).timestamp())
+    start = int(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+    end = start + 86400 - 1
     url = f"{base}?vs_currency=usd&from={start}&to={end}"
-    r = requests.get(url)
+    r = requests.get(url, headers={"User-Agent": "Pegos-Dataset-Builder/1.0"})
     if r.status_code != 200:
+        print(f"⚠️ CoinGecko hatası: {r.status_code}")
         return None, None
     data = r.json().get("prices", [])
     if not data:
@@ -51,38 +64,40 @@ def get_btc_prices(day):
     data.sort(key=lambda x: x[0])
     return data[0][1], data[-1][1]
 
-btc_rows = []
-for day in unique_days:
-    op, cl = get_btc_prices(day)
-    btc_rows.append({"day": day, "open": op, "close": cl})
-    time.sleep(1)
+print(f"💰 BTC verisi alınıyor: {latest_day}")
+open_price, close_price = get_btc_prices(latest_day)
+btc_df = pd.DataFrame([{
+    "day": latest_day,
+    "open": open_price,
+    "close": close_price,
+    "diff": (close_price - open_price) if (open_price and close_price) else None,
+    "direction": int((close_price or 0) > (open_price or 0))
+}])
+print("✅ BTC fiyatları alındı.")
 
-btc_df = pd.DataFrame(btc_rows)
-btc_df["diff"] = btc_df["close"] - btc_df["open"]
-btc_df["direction"] = (btc_df["diff"] > 0).astype(int)
-print(f"💰 BTC verisi {len(btc_df)} gün için alındı.")
+# ------------------------------------------
+# Tweetlerle birleştir
+# ------------------------------------------
+df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
+df["day"] = df["time"].dt.date.astype(str)
+btc_df["day"] = btc_df["day"].astype(str)
 
-# 5️⃣ Tweetlerle birleştir
-merged["day"] = pd.to_datetime(merged["day"])
-btc_df["day"] = pd.to_datetime(btc_df["day"])
-final_df = merged.merge(btc_df, on="day", how="left")
+merged = df.merge(btc_df, on="day", how="left")
+print(f"🔗 Birleştirme tamamlandı: {len(merged)} satır")
 
-# 6️⃣ HF'ye yükle
-output_path = "/tmp/pegos_final_dataset.csv"
-final_df.to_csv(output_path, index=False)
-print(f"💾 Kaydedildi: {output_path} ({len(final_df)} satır)")
+# ------------------------------------------
+# Kaydet ve Hugging Face'e yükle
+# ------------------------------------------
+output_path = f"/tmp/merged_{latest_day}.csv"
+merged.to_csv(output_path, index=False)
+print(f"💾 Kaydedildi: {output_path}")
 
-basename = f"merged_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+# HF yükleme
+remote_path = f"data/{latest_day}/merged.csv"
 api.upload_file(
     path_or_fileobj=output_path,
-    path_in_repo=f"data/{basename}",
+    path_in_repo=remote_path,
     repo_id=HF_DATASET_REPO,
     repo_type="dataset",
 )
-api.upload_file(
-    path_or_fileobj=output_path,
-    path_in_repo="data/latest_merged.csv",
-    repo_id=HF_DATASET_REPO,
-    repo_type="dataset",
-)
-print("🚀 HF'ye yükleme tamamlandı.")
+print(f"🚀 Yüklendi: {remote_path}")

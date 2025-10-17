@@ -1,6 +1,6 @@
-# =====================================
-# Pegos Hybrid Prediction Module (4-hour loop)
-# =====================================
+# =====================================================
+# Pegos Daily Hybrid Prediction Module 🚀
+# =====================================================
 import os
 import joblib
 import torch
@@ -9,61 +9,72 @@ import pandas as pd
 import requests
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModel
-from huggingface_hub import hf_hub_download, upload_file
+from huggingface_hub import hf_hub_download, upload_file, HfApi
 
-# 🔐 Ortam değişkenleri (GitHub Secrets)
+# ------------------------------------------
+# Ortam değişkenleri
+# ------------------------------------------
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "Caner7/pegos-stream")
+if not HF_TOKEN or not HF_DATASET_REPO:
+    raise RuntimeError("❌ HF_TOKEN veya HF_DATASET_REPO eksik!")
 
-print("🤖 Running Pegos hybrid prediction pipeline...")
+api = HfApi(token=HF_TOKEN)
+
+print("🤖 Pegos hybrid prediction pipeline başlatıldı...")
 
 # ===================================================
-# 1️⃣ Model, scaler ve tokenizer yükleme
+# 1️⃣ Günlük klasörü bul (en güncel gün)
+# ===================================================
+print("📂 Günlük klasörler listeleniyor...")
+files = api.list_repo_files(repo_id=HF_DATASET_REPO, repo_type="dataset")
+daily_folders = sorted(
+    list({f.split("/")[1] for f in files if f.startswith("data/") and len(f.split("/")) > 2})
+)
+if not daily_folders:
+    raise RuntimeError("❌ Günlük klasör bulunamadı!")
+latest_day = daily_folders[-1]
+print(f"📅 En güncel veri klasörü: {latest_day}")
+
+# ===================================================
+# 2️⃣ Model, scaler ve tokenizer yükle
 # ===================================================
 try:
-    print("📦 Loading models and scaler...")
+    print("📦 Modeller yükleniyor...")
     clf_model = joblib.load("pegos_lightgbm.pkl")
     reg_model = joblib.load("pegos_regressor.pkl")
     scaler = joblib.load("scaler.pkl")
-except Exception as e:
-    print(f"❌ Model load error: {e}")
-    exit(0)
-
-try:
-    print("🔤 Loading BERT tokenizer and model...")
     tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-turkish-cased")
     bert_model = AutoModel.from_pretrained("dbmdz/bert-base-turkish-cased")
-    bert_model.eval()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     bert_model.to(device)
+    bert_model.eval()
+    print("✅ Model yükleme tamamlandı.")
 except Exception as e:
-    print(f"⚠️ Failed to load BERT model: {e}")
-    exit(0)
+    raise RuntimeError(f"❌ Model yüklenemedi: {e}")
 
 # ===================================================
-# 2️⃣ Veri indir (Hugging Face Dataset)
+# 3️⃣ Günlük cleaned.csv dosyasını indir
 # ===================================================
 try:
-    print("📥 Downloading latest_cleaned.csv from Hugging Face...")
-    hf_file = "data/latest_cleaned.csv"
-    local_file = hf_hub_download(
+    clean_file = f"data/{latest_day}/cleaned.csv"
+    print(f"📥 HF'den indiriliyor: {clean_file}")
+    local_path = hf_hub_download(
         repo_id=HF_DATASET_REPO,
-        filename=hf_file,
+        filename=clean_file,
         repo_type="dataset",
         token=HF_TOKEN,
     )
-    df = pd.read_csv(local_file)
-    print(f"✅ Loaded {len(df)} rows, {df.shape[1]} columns.")
+    df = pd.read_csv(local_path)
+    print(f"✅ {len(df)} satır yüklendi.")
 except Exception as e:
-    print(f"⚠️ Failed to download dataset: {e}")
-    exit(0)
+    raise RuntimeError(f"❌ Veri indirilemedi: {e}")
 
 if df.empty:
-    print("⚠️ Dataset is empty — skipping this cycle.")
-    exit(0)
+    raise RuntimeError("⚠️ Veri boş geldi, tahmin yapılmadı.")
 
 # ===================================================
-# 3️⃣ BERT embedding fonksiyonu
+# 4️⃣ BERT embedding fonksiyonu
 # ===================================================
 def get_bert_embeddings(texts, tokenizer, model, batch_size=16, device="cpu"):
     model.to(device)
@@ -78,7 +89,7 @@ def get_bert_embeddings(texts, tokenizer, model, batch_size=16, device="cpu"):
     return np.vstack(all_embeds)
 
 # ===================================================
-# 4️⃣ Özellik hazırlığı
+# 5️⃣ Özellikleri hazırla
 # ===================================================
 try:
     df = df.dropna(subset=["tweet"])
@@ -91,18 +102,17 @@ try:
 
     X_num = scaler.transform(df[expected_cols].fillna(0))
 
-    print("🧠 Generating BERT embeddings...")
+    print("🧠 BERT embedding'leri üretiliyor...")
     X_text = get_bert_embeddings(texts, tokenizer, bert_model, device=device)
     X_all = np.hstack([X_text, X_num])
 except Exception as e:
-    print(f"⚠️ Feature preparation error: {e}")
-    exit(0)
+    raise RuntimeError(f"⚠️ Özellik hazırlama hatası: {e}")
 
 # ===================================================
-# 5️⃣ Tahmin üretimi (yön + fiyat farkı)
+# 6️⃣ Tahmin üretimi
 # ===================================================
 try:
-    print("📈 Predicting direction and price difference...")
+    print("📈 Tahminler üretiliyor...")
     df["pred_label"] = clf_model.predict(X_all)
     df["pred_proba"] = clf_model.predict_proba(X_all)[:, 1]
     df["pred_diff"] = reg_model.predict(X_all)
@@ -118,45 +128,48 @@ try:
     df["current_price"] = current_price
     df["predicted_price"] = current_price + df["pred_diff"]
 
-    print(f"✅ Predictions completed for {len(df)} records.")
+    print(f"✅ Tahmin tamamlandı: {len(df)} kayıt.")
 except Exception as e:
-    print(f"⚠️ Prediction error: {e}")
-    exit(0)
+    raise RuntimeError(f"⚠️ Tahmin hatası: {e}")
 
 # ===================================================
-# 6️⃣ Kaydet ve Hugging Face’e yükle
+# 7️⃣ Dosyaları kaydet
 # ===================================================
 timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-output_latest = "/tmp/predictions_latest.csv"
-output_time = f"/tmp/predictions_{timestamp}.csv"
+output_dir = f"/tmp/data/{latest_day}"
+os.makedirs(output_dir, exist_ok=True)
+
+output_latest = f"{output_dir}/predictions_latest.csv"
+output_time = f"{output_dir}/predictions_{timestamp}.csv"
 
 df.to_csv(output_latest, index=False)
 df.to_csv(output_time, index=False)
-print(f"💾 Predictions saved locally to {output_latest}")
+print(f"💾 Kaydedildi: {output_latest}")
 
-# Hugging Face’e yükle
+# ===================================================
+# 8️⃣ Hugging Face'e yükle
+# ===================================================
 try:
-    print("🚀 Uploading predictions to Hugging Face...")
+    print("🚀 Hugging Face'e yükleniyor...")
 
     upload_file(
         path_or_fileobj=output_latest,
-        path_in_repo="data/predictions_latest.csv",
+        path_in_repo=f"data/{latest_day}/predictions_latest.csv",
         repo_id=HF_DATASET_REPO,
         repo_type="dataset",
         token=HF_TOKEN,
-        commit_message=f"Upload latest predictions ({timestamp})"
+        commit_message=f"Upload latest predictions for {latest_day}"
     )
 
     upload_file(
         path_or_fileobj=output_time,
-        path_in_repo=f"data/predictions_{timestamp}.csv",
+        path_in_repo=f"data/{latest_day}/predictions_{timestamp}.csv",
         repo_id=HF_DATASET_REPO,
         repo_type="dataset",
         token=HF_TOKEN,
-        commit_message=f"Upload timestamped predictions ({timestamp})"
+        commit_message=f"Upload timestamped predictions for {latest_day}"
     )
 
-    print("✅ Predictions uploaded to HF successfully.")
+    print(f"✅ Tahmin dosyaları Hugging Face'e yüklendi: data/{latest_day}/")
 except Exception as e:
-    print(f"⚠️ Upload failed: {e}")
-           
+    raise RuntimeError(f"⚠️ Upload hatası: {e}")
