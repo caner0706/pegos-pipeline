@@ -1,46 +1,49 @@
-# =====================================================
-# Pegos Upload Script (Daily Folder Upload)
-# =====================================================
 import os
 import sys
 from datetime import datetime
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, upload_file
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
-HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO", "Caner7/pegos-stream")
+HF_DATASET_REPO = os.environ.get("HF_DATASET_REPO")
+LOCAL_CSV = os.environ.get("LOCAL_CSV")
 
-if HF_TOKEN is None:
-    print("❌ HF_TOKEN missing.")
+if not HF_TOKEN or not HF_DATASET_REPO:
+    print("❌ HF_TOKEN veya HF_DATASET_REPO eksik.")
     sys.exit(1)
+
+if not LOCAL_CSV or not os.path.exists(LOCAL_CSV):
+    print("❌ LOCAL_CSV yok veya bulunamadı:", LOCAL_CSV)
+    sys.exit(1)
+
+# /tmp/data/YYYY-MM-DD/pegos_output.csv -> YYYY-MM-DD
+try:
+    parts = LOCAL_CSV.strip("/").split("/")
+    day_folder = parts[-2]  # .../data/YYYY-MM-DD/pegos_output.csv
+except Exception:
+    day_folder = datetime.utcnow().strftime("%Y-%m-%d")
+
+print(f"📁 Günlük klasör: {day_folder}")
 
 api = HfApi(token=HF_TOKEN)
-LOCAL_CSV = os.environ.get("LOCAL_CSV", "/tmp/data/pegos_output.csv")
 
-if not os.path.exists(LOCAL_CSV):
-    print(f"❌ CSV not found: {LOCAL_CSV}")
-    sys.exit(1)
+# Arşiv adı: blockchain_tweets_YYYY-MM-DD.csv
+archive_name = f"data/{day_folder}/blockchain_tweets_{day_folder}.csv"
 
-# Günlük klasör ismi
-today = datetime.utcnow().strftime("%Y-%m-%d")
-basename = f"data/{today}/blockchain_tweets_{today}.csv"
-latest_path = f"data/{today}/latest.csv"
-
-print(f"📁 Günlük klasör: {today}")
-
-# Arşiv dosyası
-api.upload_file(
+upload_file(
     path_or_fileobj=LOCAL_CSV,
-    path_in_repo=basename,
+    path_in_repo=archive_name,
     repo_id=HF_DATASET_REPO,
-    repo_type="dataset"
+    repo_type="dataset",
+    token=HF_TOKEN,
 )
-print(f"✅ Uploaded archive: {basename}")
+print("✅ Uploaded archive:", archive_name)
 
-# En son veri
-api.upload_file(
+# Günlük latest
+upload_file(
     path_or_fileobj=LOCAL_CSV,
-    path_in_repo=latest_path,
+    path_in_repo=f"data/{day_folder}/latest.csv",
     repo_id=HF_DATASET_REPO,
-    repo_type="dataset"
+    repo_type="dataset",
+    token=HF_TOKEN,
 )
-print(f"✅ Updated daily latest: {latest_path}")
+print("✅ Updated:", f"data/{day_folder}/latest.csv")
