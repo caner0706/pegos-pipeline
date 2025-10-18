@@ -1,5 +1,5 @@
 # =====================================================
-# Pegos Dataset Builder (Append + Daily Folder)
+# Pegos Dataset Builder (Append + Daily Folder + Fallback)
 # =====================================================
 import os
 import time
@@ -12,15 +12,13 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
 api = HfApi(token=HF_TOKEN)
 
-# 🔹 Günlük klasör ismi
 TODAY = datetime.utcnow().strftime("%Y-%m-%d")
 print(f"📂 Günlük klasör: {TODAY}")
 
 # =====================================================
-# 1️⃣ HF üzerinde mevcut günlük dosya varsa indir
+# 1️⃣ HF üzerinde mevcut günlük dataset varsa indir
 # =====================================================
 merged_path_hf = f"data/{TODAY}/pegos_final_dataset.csv"
-local_existing = None
 existing_df = pd.DataFrame()
 
 try:
@@ -37,22 +35,36 @@ except Exception:
     print("ℹ️ Mevcut veri bulunamadı, yeni dosya oluşturulacak.")
 
 # =====================================================
-# 2️⃣ Yeni tweet CSV’lerini indir
+# 2️⃣ Yeni tweet CSV'lerini indir (fallback: latest.csv)
 # =====================================================
-print("📥 Yeni tweet dosyaları indiriliyor...")
+print("📥 Yeni tweet dosyaları aranıyor...")
 files = api.list_repo_files(repo_id=HF_DATASET_REPO, repo_type="dataset")
-tweet_files = [f for f in files if f.endswith(".csv") and "blockchain_tweets_" in f]
+
+tweet_files = [
+    f for f in files
+    if f.endswith(".csv")
+    and ("blockchain_tweets_" in f or f.endswith("latest.csv"))
+]
 
 if not tweet_files:
-    raise RuntimeError("❌ HF üzerinde tweet CSV bulunamadı!")
+    raise RuntimeError("❌ HF üzerinde tweet CSV bulunamadı veya henüz yüklenmedi!")
 
 dfs = []
 for f in tweet_files:
-    p = hf_hub_download(
-        repo_id=HF_DATASET_REPO, filename=f, repo_type="dataset", token=HF_TOKEN
-    )
-    dfs.append(pd.read_csv(p))
-print(f"✅ {len(dfs)} dosya indirildi")
+    try:
+        path = hf_hub_download(
+            repo_id=HF_DATASET_REPO,
+            filename=f,
+            repo_type="dataset",
+            token=HF_TOKEN,
+        )
+        dfs.append(pd.read_csv(path))
+        print(f"✅ {f} indirildi")
+    except Exception as e:
+        print(f"⚠️ {f} indirilemedi: {e}")
+
+if not dfs:
+    raise RuntimeError("❌ Yeni tweet verisi indirilemedi!")
 
 new_df = pd.concat(dfs, ignore_index=True)
 new_df["time"] = pd.to_datetime(new_df["time"], errors="coerce", utc=True)
@@ -60,14 +72,14 @@ new_df["day"] = new_df["time"].dt.date
 print(f"🆕 Yeni tweet sayısı: {len(new_df)}")
 
 # =====================================================
-# 3️⃣ Eski + Yeni birleştir
+# 3️⃣ Eski + Yeni birleştir (append)
 # =====================================================
 combined = pd.concat([existing_df, new_df], ignore_index=True)
 combined.drop_duplicates(subset=["tweet", "time"], inplace=True)
 print(f"📊 Birleştirilmiş toplam: {len(combined)} satır")
 
 # =====================================================
-# 4️⃣ BTC fiyatlarını al
+# 4️⃣ BTC fiyatlarını al ve merge et
 # =====================================================
 def get_btc_prices(day):
     base = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range"
@@ -88,7 +100,7 @@ btc_rows = []
 for day in unique_days:
     op, cl = get_btc_prices(day)
     btc_rows.append({"day": day, "open": op, "close": cl})
-    time.sleep(0.5)
+    time.sleep(0.3)
 
 btc_df = pd.DataFrame(btc_rows)
 btc_df["diff"] = btc_df["close"] - btc_df["open"]
