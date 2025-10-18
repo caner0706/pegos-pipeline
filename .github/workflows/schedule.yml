@@ -86,20 +86,25 @@ jobs:
       # ===========================
       # 2️⃣ Hugging Face'e tweet upload (daily folder)
       # ===========================
-      - name: Upload scraped data to Hugging Face (daily folder)
+      - name: Upload scraped data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
           TODAY=$(date +'%Y-%m-%d')
-          CSV_PATH="/tmp/data/${TODAY}/pegos_output.csv"
-          if [ -f "$CSV_PATH" ]; then
+          DAILY_CSV="/tmp/data/${TODAY}/pegos_output.csv"
+          echo "📅 Checking for daily CSV at: $DAILY_CSV"
+          if [ -f "$DAILY_CSV" ]; then
             echo "📤 Uploading CSV for $TODAY..."
-            export LOCAL_CSV="$CSV_PATH"
+            export LOCAL_CSV="$DAILY_CSV"
+            python upload_to_hf.py
+          elif [ -f "/tmp/pegos_output.csv" ]; then
+            echo "⚠️ Fallback: Uploading main /tmp/pegos_output.csv instead..."
+            export LOCAL_CSV="/tmp/pegos_output.csv"
             python upload_to_hf.py
           else
-            echo "⚠️ No CSV file found at $CSV_PATH — skipping upload."
+            echo "❌ No CSV file found — skipping upload."
           fi
 
       # ===========================
@@ -147,16 +152,8 @@ jobs:
       - name: List HF dataset files
         if: always()
         run: |
-          python - <<'PYCODE'
-import os
-from huggingface_hub import HfApi
-api = HfApi(token=os.getenv("HF_TOKEN"))
-repo = os.getenv("HF_DATASET_REPO")
-print("📂 Hugging Face dataset file list:")
-for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
-    if "data/" in f:
-        print(" -", f)
-PYCODE
+          echo "📂 Listing HF dataset files..."
+          python -c "import os; from huggingface_hub import HfApi; api=HfApi(token=os.getenv('HF_TOKEN')); repo=os.getenv('HF_DATASET_REPO'); [print(' -', f) for f in api.list_repo_files(repo_id=repo, repo_type='dataset')]"
 
       # ===========================
       # 7️⃣ Workspace dosyaları
@@ -164,9 +161,12 @@ PYCODE
       - name: Show workspace files
         if: always()
         run: |
+          echo '📁 Workspace contents:'
           ls -lah /tmp || true
-          ls -lah /tmp/data || true
-          echo "📁 Temporary data folder structure displayed."
+          if [ -d "/tmp/data" ]; then
+            echo '📅 Daily data folders:'
+            ls -lah /tmp/data
+          fi
 
       # ===========================
       # 8️⃣ Notebook çıktı özeti
