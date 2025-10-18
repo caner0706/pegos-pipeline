@@ -215,7 +215,7 @@ Then open → http://localhost:8000/docs
 **MIT License**
 
 Developed by **Caner Giden**  
-📧 canergiden.dev@gmail.com  
+📧 canergiden7@gmail.com  
 💼 [LinkedIn](linkedin.com/in/caner-giden)  
 🧠 [Hugging Face](https://huggingface.co/Caner7)
 
