@@ -216,7 +216,7 @@ Then open → http://localhost:8000/docs
 
 Developed by **Caner Giden**  
 📧 canergiden7@gmail.com  
-💼 [LinkedIn](linkedin.com/in/caner-giden)  
+💼 [LinkedIn]((https://www.linkedin.com/in/caner-giden/))  
 🧠 [Hugging Face](https://huggingface.co/Caner7)
 
 ---
