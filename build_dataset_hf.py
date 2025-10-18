@@ -1,94 +1,66 @@
 # =====================================================
-# Pegos Dataset Builder (Append + Daily Folder + Fallback + Stable)
+# Pegos Dataset Builder (Stable + No _x/_y + UTF-8 Safe)
 # =====================================================
 import os
 import time
 import pandas as pd
 import requests
 from datetime import datetime, timezone
-from huggingface_hub import HfApi, hf_hub_download, upload_file
+from huggingface_hub import hf_hub_download, upload_file
 
-# === ENV AYARLARI ===
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
-api = HfApi(token=HF_TOKEN)
 
 TODAY = datetime.utcnow().strftime("%Y-%m-%d")
 print(f"📂 Günlük klasör: {TODAY}")
 
-# =====================================================
-# 1️⃣ Mevcut günün final dosyası varsa indir
-# =====================================================
-merged_hf = f"data/{TODAY}/pegos_final_dataset.csv"
+# === 1️⃣ Mevcut final dosyası (varsa) ===
 existing_df = pd.DataFrame()
 try:
-    print(f"📥 HF üzerinde {merged_hf} aranıyor...")
-    local_existing = hf_hub_download(
+    path = hf_hub_download(
         repo_id=HF_DATASET_REPO,
-        filename=merged_hf,
+        filename=f"data/{TODAY}/pegos_final_dataset.csv",
         repo_type="dataset",
         token=HF_TOKEN
     )
-    existing_df = pd.read_csv(local_existing)
+    existing_df = pd.read_csv(path)
     print(f"🔁 Mevcut veri bulundu: {len(existing_df)} satır")
 except Exception:
-    print("ℹ️ Mevcut günlük dataset yok, yeni oluşturulacak.")
+    print("ℹ️ Mevcut final dataset yok, yeni oluşturulacak.")
 
-# =====================================================
-# 2️⃣ Yeni tweet dosyasını bul (önce latest.csv, yoksa arşiv)
-# =====================================================
+# === 2️⃣ Yeni tweet verisini al (latest.csv öncelikli) ===
 new_df = pd.DataFrame()
-candidate_files = [
-    f"data/{TODAY}/latest.csv",
-    f"data/{TODAY}/blockchain_tweets_{TODAY}.csv"
-]
-
-found_path = None
-for file in candidate_files:
+for name in [f"data/{TODAY}/latest.csv", f"data/{TODAY}/blockchain_tweets_{TODAY}.csv"]:
     try:
-        print(f"📥 Kontrol ediliyor: {file}")
-        found_path = hf_hub_download(
-            repo_id=HF_DATASET_REPO,
-            filename=file,
-            repo_type="dataset",
-            token=HF_TOKEN
-        )
-        print(f"✅ Dosya bulundu: {file}")
+        path = hf_hub_download(repo_id=HF_DATASET_REPO, filename=name, repo_type="dataset", token=HF_TOKEN)
+        new_df = pd.read_csv(path, encoding="utf-8")
+        print(f"✅ Veri bulundu: {name}")
         break
     except Exception:
         continue
 
-if not found_path:
-    raise RuntimeError("❌ HF üzerinde tweet CSV bulunamadı (ne latest ne arşiv).")
-
-new_df = pd.read_csv(found_path)
 if new_df.empty:
-    print("⚠️ Yeni tweet verisi boş geldi, pipeline devam ediyor...")
+    print("⚠️ Yeni tweet verisi boş veya bulunamadı.")
+    new_df = pd.DataFrame(columns=existing_df.columns if not existing_df.empty else [])
 
-# normalize & gün kolonu
-new_df["time"] = pd.to_datetime(new_df.get("time"), errors="coerce", utc=True)
-new_df["day"] = new_df["time"].dt.strftime("%Y-%m-%d")
+# === 3️⃣ Normalize ===
+for df in [existing_df, new_df]:
+    if "time" in df:
+        df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
+        df["day"] = df["time"].dt.strftime("%Y-%m-%d")
 
-# =====================================================
-# 3️⃣ Append + unique
-# =====================================================
 combined = pd.concat([existing_df, new_df], ignore_index=True)
 combined.drop_duplicates(subset=["tweet", "time"], inplace=True)
-print(f"📊 Birleştirilmiş toplam: {len(combined)} satır")
+combined["day"] = combined["day"].astype(str)
 
-# =====================================================
-# 4️⃣ BTC fiyatlarını al (her gün için open/close)
-# =====================================================
-def get_btc_prices(day_str: str):
+# === 4️⃣ BTC fiyatı ekle (sadece map, merge yok) ===
+def get_btc(day_str):
     try:
-        day = datetime.strptime(day_str, "%Y-%m-%d").date()
-        base = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range"
-        start = int(datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc).timestamp())
-        end = int(datetime.combine(day, datetime.max.time(), tzinfo=timezone.utc).timestamp())
-        url = f"{base}?vs_currency=usd&from={start}&to={end}"
+        d = datetime.strptime(day_str, "%Y-%m-%d").date()
+        start = int(datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc).timestamp())
+        end = int(datetime.combine(d, datetime.max.time(), tzinfo=timezone.utc).timestamp())
+        url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from={start}&to={end}"
         r = requests.get(url, timeout=15)
-        if r.status_code != 200:
-            return None, None
         data = r.json().get("prices", [])
         if not data:
             return None, None
@@ -97,39 +69,28 @@ def get_btc_prices(day_str: str):
     except Exception:
         return None, None
 
-# tür karışıklığını önlemek için day -> str
-combined["day"] = combined["day"].astype(str)
 unique_days = sorted(combined["day"].dropna().unique())
-
-btc_rows = []
+btc_info = {}
 for day in unique_days:
-    op, cl = get_btc_prices(day)
-    btc_rows.append({"day": day, "open": op, "close": cl})
-    time.sleep(0.3)
+    op, cl = get_btc(day)
+    btc_info[day] = {"open": op, "close": cl, "diff": (cl or 0) - (op or 0) if op and cl else None,
+                     "direction": int((cl or 0) > (op or 0)) if op and cl else None}
+    time.sleep(0.2)
 
-btc_df = pd.DataFrame(btc_rows)
-btc_df["diff"] = btc_df["close"] - btc_df["open"]
-btc_df["direction"] = (btc_df["diff"] > 0).astype(int)
+for c in ["open", "close", "diff", "direction"]:
+    combined[c] = combined["day"].map(lambda d: btc_info.get(d, {}).get(c))
 
-final_df = combined.merge(btc_df, on="day", how="left")
-
-# =====================================================
-# 5️⃣ Kaydet & Hugging Face'e yükle
-# =====================================================
+# === 5️⃣ Kaydet ===
 os.makedirs(f"/tmp/{TODAY}", exist_ok=True)
-out_path = f"/tmp/{TODAY}/pegos_final_dataset.csv"
-final_df.to_csv(out_path, index=False)
-print(f"💾 Kaydedildi: {out_path} ({len(final_df)} satır)")
+out = f"/tmp/{TODAY}/pegos_final_dataset.csv"
+combined.to_csv(out, index=False, encoding="utf-8")
+print(f"💾 Kaydedildi: {out} ({len(combined)} satır)")
 
-try:
-    upload_file(
-        path_or_fileobj=out_path,
-        path_in_repo=f"data/{TODAY}/pegos_final_dataset.csv",
-        repo_id=HF_DATASET_REPO,
-        repo_type="dataset",
-        token=HF_TOKEN,
-        commit_message=f"Append merged dataset for {TODAY}"
-    )
-    print("🚀 Günlük dataset Hugging Face’e başarıyla yüklendi.")
-except Exception as e:
-    print(f"⚠️ Upload sırasında hata oluştu: {e}")
+upload_file(
+    path_or_fileobj=out,
+    path_in_repo=f"data/{TODAY}/pegos_final_dataset.csv",
+    repo_id=HF_DATASET_REPO,
+    repo_type="dataset",
+    token=HF_TOKEN
+)
+print("🚀 Dataset HF'e yüklendi.")
