@@ -1,11 +1,11 @@
 # =====================================================
-# Pegos Dataset Builder (Stable + No _x/_y + UTF-8 Safe)
+# Pegos Dataset Builder (Stable + Binance Fallback + UTF-8 Safe)
 # =====================================================
 import os
 import time
 import pandas as pd
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from huggingface_hub import hf_hub_download, upload_file
 
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -53,44 +53,79 @@ combined = pd.concat([existing_df, new_df], ignore_index=True)
 combined.drop_duplicates(subset=["tweet", "time"], inplace=True)
 combined["day"] = combined["day"].astype(str)
 
-# === 4️⃣ BTC fiyatı ekle (sadece map, merge yok) ===
-def get_btc(day_str):
+# === 4️⃣ BTC fiyatlarını al (CoinGecko + Binance fallback) ===
+def get_btc(day_str: str):
+    """Günlük BTC fiyatı: önce CoinGecko, sonra Binance fallback"""
     try:
-        d = datetime.strptime(day_str, "%Y-%m-%d").date()
-        start = int(datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc).timestamp())
-        end = int(datetime.combine(d, datetime.max.time(), tzinfo=timezone.utc).timestamp())
-        url = f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from={start}&to={end}"
-        r = requests.get(url, timeout=15)
-        data = r.json().get("prices", [])
-        if not data:
-            return None, None
-        data.sort(key=lambda x: x[0])
-        return data[0][1], data[-1][1]
-    except Exception:
+        day = datetime.strptime(day_str, "%Y-%m-%d").date()
+        start_ts = int(datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc).timestamp())
+        end_ts = int(datetime.combine(day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).timestamp())
+
+        # 🟢 1. CoinGecko API
+        cg_url = (
+            f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range"
+            f"?vs_currency=usd&from={start_ts}&to={end_ts}"
+        )
+        r = requests.get(cg_url, timeout=15)
+        if r.status_code == 200:
+            data = r.json().get("prices", [])
+            if data:
+                data.sort(key=lambda x: x[0])
+                open_p, close_p = data[0][1], data[-1][1]
+                return open_p, close_p
+
+        # 🟡 2. Binance fallback
+        start_ms = start_ts * 1000
+        end_ms = end_ts * 1000
+        binance_url = (
+            f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d"
+            f"&startTime={start_ms}&endTime={end_ms}"
+        )
+        res = requests.get(binance_url, timeout=10)
+        if res.status_code == 200 and len(res.json()) > 0:
+            o, c = float(res.json()[0][1]), float(res.json()[0][4])
+            return o, c
+
+        print(f"⚠️ BTC fiyatı bulunamadı ({day_str})")
         return None, None
 
+    except Exception as e:
+        print(f"⚠️ get_btc hata ({day_str}): {e}")
+        return None, None
+
+
+# === 5️⃣ Günlük fiyat verilerini uygula ===
 unique_days = sorted(combined["day"].dropna().unique())
 btc_info = {}
+
 for day in unique_days:
     op, cl = get_btc(day)
-    btc_info[day] = {"open": op, "close": cl, "diff": (cl or 0) - (op or 0) if op and cl else None,
-                     "direction": int((cl or 0) > (op or 0)) if op and cl else None}
+    if op and cl:
+        diff = cl - op
+        direction = int(diff > 0)
+    else:
+        diff, direction = None, None
+    btc_info[day] = {"open": op, "close": cl, "diff": diff, "direction": direction}
     time.sleep(0.2)
 
-for c in ["open", "close", "diff", "direction"]:
-    combined[c] = combined["day"].map(lambda d: btc_info.get(d, {}).get(c))
+for col in ["open", "close", "diff", "direction"]:
+    combined[col] = combined["day"].map(lambda d: btc_info.get(d, {}).get(col))
 
-# === 5️⃣ Kaydet ===
+# === 6️⃣ Kaydet ve HF'e yükle ===
 os.makedirs(f"/tmp/{TODAY}", exist_ok=True)
 out = f"/tmp/{TODAY}/pegos_final_dataset.csv"
 combined.to_csv(out, index=False, encoding="utf-8")
 print(f"💾 Kaydedildi: {out} ({len(combined)} satır)")
 
-upload_file(
-    path_or_fileobj=out,
-    path_in_repo=f"data/{TODAY}/pegos_final_dataset.csv",
-    repo_id=HF_DATASET_REPO,
-    repo_type="dataset",
-    token=HF_TOKEN
-)
-print("🚀 Dataset HF'e yüklendi.")
+try:
+    upload_file(
+        path_or_fileobj=out,
+        path_in_repo=f"data/{TODAY}/pegos_final_dataset.csv",
+        repo_id=HF_DATASET_REPO,
+        repo_type="dataset",
+        token=HF_TOKEN,
+        commit_message=f"Append dataset for {TODAY} (with BTC fallback)"
+    )
+    print("🚀 Dataset Hugging Face’e başarıyla yüklendi.")
+except Exception as e:
+    print(f"⚠️ Upload hatası: {e}")
