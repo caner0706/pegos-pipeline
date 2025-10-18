@@ -114,11 +114,4 @@ upload_file(
     token=HF_TOKEN,
     commit_message=f"Append merged dataset for {TODAY}",
 )
-upload_file(
-    path_or_fileobj=out_path,
-    path_in_repo="data/latest_merged.csv",
-    repo_id=HF_DATASET_REPO,
-    repo_type="dataset",
-    token=HF_TOKEN,
-)
 print("🚀 Günlük dataset Hugging Face’e başarıyla yüklendi.")
