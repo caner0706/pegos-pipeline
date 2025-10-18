@@ -53,11 +53,4 @@ upload_file(
     repo_type="dataset",
     token=HF_TOKEN,
 )
-upload_file(
-    path_or_fileobj=out_path,
-    path_in_repo="data/latest_cleaned.csv",
-    repo_id=HF_DATASET_REPO,
-    repo_type="dataset",
-    token=HF_TOKEN,
-)
 print("🚀 Temizlenmiş veri Hugging Face’e yüklendi.")
