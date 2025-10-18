@@ -1,9 +1,8 @@
 # =====================================================
-# Pegos Dataset Cleaning (Daily Folder + Append Support)
+# Pegos Dataset Cleaning (Daily Folder)
 # =====================================================
 import os
 import pandas as pd
-import numpy as np
 from datetime import datetime
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 
@@ -12,45 +11,35 @@ HF_DATASET_REPO = os.getenv("HF_DATASET_REPO")
 api = HfApi(token=HF_TOKEN)
 TODAY = datetime.utcnow().strftime("%Y-%m-%d")
 
-print(f"📂 Günlük klasör: {TODAY}")
-
-# =====================================================
-# 1️⃣ Günlük dataset indir
-# =====================================================
 target_file = f"data/{TODAY}/pegos_final_dataset.csv"
+print(f"📥 İndiriliyor: {target_file}")
 
-try:
-    print(f"📥 İndiriliyor: {target_file}")
-    path = hf_hub_download(
-        repo_id=HF_DATASET_REPO,
-        filename=target_file,
-        repo_type="dataset",
-        token=HF_TOKEN,
-    )
-    df = pd.read_csv(path)
-except Exception as e:
-    raise RuntimeError(f"❌ Günlük dosya indirilemedi: {e}")
+path = hf_hub_download(
+    repo_id=HF_DATASET_REPO,
+    filename=target_file,
+    repo_type="dataset",
+    token=HF_TOKEN,
+)
 
+df = pd.read_csv(path)
 print(f"✅ Veri yüklendi ({len(df)} satır)")
 
-# =====================================================
-# 2️⃣ Temizlik işlemleri
-# =====================================================
+# Temizlik
 df.drop_duplicates(subset=["tweet", "time"], inplace=True)
-df.dropna(subset=["tweet", "open", "close"], inplace=True)
+df.dropna(subset=["tweet"], inplace=True)
+if {"open","close"}.issubset(df.columns):
+    df.dropna(subset=["open","close"], inplace=True)
 
 for col in ["comment", "retweet", "like", "see_count", "diff"]:
-    if col in df.columns:
+    if col in df.columns and len(df) > 0:
         q1, q3 = df[col].quantile(0.01), df[col].quantile(0.99)
         df = df[df[col].between(q1, q3)]
 
 df["time"] = pd.to_datetime(df["time"], errors="coerce")
 df = df.dropna(subset=["time"])
-df = df[df["time"] > "2020-01-01"]
+df = df[df["time"] >= "2020-01-01"]
 
-# =====================================================
-# 3️⃣ Kaydet & Yükle
-# =====================================================
+# Save & Upload (yalnızca gün klasörü)
 os.makedirs(f"/tmp/{TODAY}", exist_ok=True)
 out_path = f"/tmp/{TODAY}/cleaned.csv"
 df.to_csv(out_path, index=False)
