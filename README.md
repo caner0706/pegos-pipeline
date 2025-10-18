@@ -57,7 +57,7 @@ Hugging Face Spaces (Pegos API)
 |-----------|----------|------|
 | 📊 Dataset | Hugging Face Datasets | [Caner7/pegos-stream](https://huggingface.co/datasets/Caner7/pegos-stream) |
 | 🧩 API | Hugging Face Spaces | [Pegos Data API](https://caner7-pegos-data.hf.space) |
-| 🧱 Source | GitHub | [Caner7/pegos-pipeline](https://github.com/Caner7/pegos-pipeline) |
+| 🧱 Dashboard | Hugging Face Spaces| [Caner7/pegos-dashboard](https://huggingface.co/spaces/Caner7/pegos_dashboard) |
 
 ---
 
@@ -216,7 +216,7 @@ Then open → http://localhost:8000/docs
 
 Developed by **Caner Giden**  
 📧 canergiden.dev@gmail.com  
-💼 [LinkedIn](https://linkedin.com/in/canergiden)  
+💼 [LinkedIn](linkedin.com/in/caner-giden)  
 🧠 [Hugging Face](https://huggingface.co/Caner7)
 
 ---
