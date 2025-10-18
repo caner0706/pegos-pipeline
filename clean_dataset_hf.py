@@ -1,5 +1,5 @@
 # =====================================================
-# Pegos Dataset Cleaning (Safe & Minimal Loss Version)
+# Pegos Dataset Cleaning (Only Zero-Engagement Filter)
 # =====================================================
 import os
 import pandas as pd
@@ -24,13 +24,7 @@ path = hf_hub_download(
 df = pd.read_csv(path, encoding="utf-8")
 print(f"✅ Veri yüklendi ({len(df)} satır)")
 
-# === 1️⃣ Temel temizlik ===
-df.drop_duplicates(subset=["tweet", "time"], inplace=True)
-df.dropna(subset=["tweet"], inplace=True)
-if {"open", "close"}.issubset(df.columns):
-    df.dropna(subset=["open", "close"], inplace=True)
-
-# === 2️⃣ Etkileşim filtresi (hepsi 0 olanları sil) ===
+# === 1️⃣ Sadece sıfır etkileşimli satırları temizle ===
 if all(col in df.columns for col in ["comment", "retweet", "like", "see_count"]):
     before = len(df)
     df = df[~((df["comment"] == 0) & (df["retweet"] == 0) &
@@ -38,19 +32,7 @@ if all(col in df.columns for col in ["comment", "retweet", "like", "see_count"])
     removed = before - len(df)
     print(f"🧹 Sıfır etkileşimli {removed} satır temizlendi.")
 
-# === 3️⃣ Tarih ve zaman doğrulama ===
-df["time"] = pd.to_datetime(df["time"], errors="coerce")
-df = df.dropna(subset=["time"])
-df = df[df["time"] >= "2020-01-01"]
-
-# === 4️⃣ Outlier temizliği (devre dışı) ===
-# (Veri kaybını önlemek için bu adım atlandı)
-# for col in ["comment", "retweet", "like", "see_count", "diff"]:
-#     if col in df.columns and len(df) > 0:
-#         q1, q3 = df[col].quantile(0.01), df[col].quantile(0.99)
-#         df = df[df[col].between(q1, q3)]
-
-# === 5️⃣ Kaydet ve yükle ===
+# === 2️⃣ Kaydet ve HF'e yükle ===
 os.makedirs(f"/tmp/{TODAY}", exist_ok=True)
 out_path = f"/tmp/{TODAY}/cleaned.csv"
 df.to_csv(out_path, index=False, encoding="utf-8")
