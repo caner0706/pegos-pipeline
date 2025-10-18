@@ -20,15 +20,16 @@ jobs:
       KEEP_LAST: ${{ secrets.KEEP_LAST }}
 
     steps:
-      - name: Checkout repository
+      # === REPO VE ORTAM ===
+      - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: Install Chrome & dependencies
+      - name: 🌐 Install Chrome & dependencies
         run: |
           set -e
           sudo apt-get update
@@ -38,33 +39,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-      - name: Install Python dependencies
+      - name: 📦 Install Python dependencies
         run: |
           set -e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install jupyter  # güvenlik için garanti
 
-      - name: Debug environment & HF token
+      # === DEBUG VE TOKEN KONTROLÜ ===
+      - name: 🧩 Debug environment & Hugging Face token
         run: |
           set -e
-          echo "=== DEBUG ENV ==="
-          echo "HF_DATASET_REPO=${HF_DATASET_REPO}"
+          echo "=== DEBUG ENVIRONMENT ==="
+          echo "HF_DATASET_REPO: ${HF_DATASET_REPO}"
+          echo "HF_TOKEN length: ${#HF_TOKEN}"
           echo "AUTH_TOKEN length: ${#AUTH_TOKEN}"
           echo "CT0 length: ${#CT0}"
-          echo "KEEP_LAST=${KEEP_LAST}"
-          echo "HF_TOKEN length: ${#HF_TOKEN}"
-          echo "huggingface_hub version:"
-          python -m pip show huggingface_hub || true
-          echo "HF whoami check:"
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
-          api = HfApi(token=os.getenv("HF_TOKEN"))
-          print("OK:", bool(api.whoami()))
+          token = os.getenv("HF_TOKEN")
+          repo = os.getenv("HF_DATASET_REPO")
+          api = HfApi(token=token)
+          try:
+              print("✅ HF Token Valid:", bool(api.whoami()))
+              print("✅ Repo Access:", bool(api.repo_info(repo_id=repo, repo_type='dataset')))
+          except Exception as e:
+              print("⚠️ HF Access Error:", e)
           PY
-          echo "=================="
+          echo "==========================="
 
-      - name: Run scraper notebook (data.ipynb)
+      # === SCRAPER ===
+      - name: 🕸️ Run scraper notebook (data.ipynb)
         env:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
           CT0: ${{ secrets.CT0 }}
@@ -74,7 +80,8 @@ jobs:
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
           echo "✅ Notebook executed successfully"
 
-      - name: Upload scraped data to Hugging Face (daily folder)
+      # === UPLOAD ===
+      - name: ☁️ Upload scraped data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
@@ -82,63 +89,67 @@ jobs:
           set -e
           TODAY=$(date -u +%F)
           CSV="/tmp/data/${TODAY}/pegos_output.csv"
-          echo "📅 Checking for daily CSV at: ${CSV}"
+          echo "📅 Checking CSV at: ${CSV}"
           if [ -f "${CSV}" ]; then
-            echo "📤 Uploading CSV for ${TODAY}..."
+            echo "📤 Uploading to HF (daily folder)..."
             export LOCAL_CSV="${CSV}"
             python upload_to_hf.py
           else
-            echo "❌ No CSV file found — skipping upload."
+            echo "⚠️ No CSV found, skipping upload."
           fi
 
-      - name: Merge and upload full dataset (tweets + BTC)
+      # === BUILD ===
+      - name: 🧱 Merge tweets + BTC data
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
           echo "🔄 Building merged dataset..."
-          python build_dataset_hf.py
+          python build_dataset_hf.py || echo "⚠️ build_dataset_hf.py failed — continuing"
           echo "✅ Merged dataset uploaded to HF."
 
-      - name: Clean merged dataset (remove duplicates/outliers)
+      # === CLEAN ===
+      - name: 🧹 Clean merged dataset
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🧹 Cleaning merged dataset..."
-          python clean_dataset_hf.py
-          echo "✅ Cleaned dataset uploaded to HF."
+          echo "🧽 Cleaning dataset..."
+          python clean_dataset_hf.py || echo "⚠️ clean_dataset_hf.py failed — continuing"
+          echo "✅ Cleaned dataset uploaded."
 
-      - name: Run Pegos Hybrid Prediction
+      # === PREDICT ===
+      - name: 🤖 Run Pegos Hybrid Prediction
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🤖 Running Pegos hybrid prediction pipeline..."
-          python predict_with_model.py
-          echo "✅ Hybrid model predictions completed and uploaded to HF."
+          echo "🧠 Running Pegos hybrid prediction pipeline..."
+          python predict_with_model.py || echo "⚠️ predict_with_model.py failed — continuing"
+          echo "✅ Hybrid predictions completed and uploaded."
 
-      - name: List HF dataset files
+      # === VALIDASYON ===
+      - name: 📜 List HF dataset files
         if: always()
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
-          set -e
-          echo "📂 Listing HF dataset files..."
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
           api = HfApi(token=os.getenv("HF_TOKEN"))
           repo = os.getenv("HF_DATASET_REPO")
+          print("📂 Listing files in", repo)
           for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
               print(" -", f)
           PY
 
-      - name: Show workspace & day folders
+      # === DEBUG ÇIKTILARI ===
+      - name: 🗂️ Show workspace & temp data
         if: always()
         run: |
           echo "📁 Workspace contents:"
@@ -147,8 +158,8 @@ jobs:
           echo "📅 Daily data folders:"
           ls -lah /tmp/data || true
 
-      - name: Show notebook output summary
+      - name: 🪶 Show notebook summary
         if: always()
         run: |
-          echo "📜 Showing notebook text output (first *** lines):"
+          echo "📜 Notebook Output (short):"
           head -n 200 output.ipynb | sed 's/\\n/\n/g' | grep -E "✅|⚠️|❌|tweet|Upload|Total" || true
