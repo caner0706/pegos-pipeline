@@ -2,7 +2,7 @@ name: Pegos Live Data Fetch & Predict
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # her 4 saatte bir (UTC)
+    - cron: "0 */4 * * *"   # Her 4 saatte bir (UTC)
   workflow_dispatch:
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
           set -e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install jupyter  # güvenlik için garanti
+          pip install jupyter  # notebook çalıştırma garantisi
 
       # === DEBUG VE TOKEN KONTROLÜ ===
       - name: 🧩 Debug environment & Hugging Face token
@@ -78,58 +78,61 @@ jobs:
           set -e
           echo "🚀 Starting Pegos Twitter Scraper..."
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
-          echo "✅ Notebook executed successfully"
+          echo "✅ Scraper notebook executed successfully"
 
-      # === UPLOAD ===
+      # === UPLOAD (flat structure) ===
       - name: ☁️ Upload scraped data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          TODAY=$(date -u +%F)
-          CSV="/tmp/data/${TODAY}/pegos_output.csv"
-          echo "📅 Checking CSV at: ${CSV}"
+          CSV="/tmp/data/$(date -u +%F)/pegos_output.csv"
+          ALT="/tmp/data/$(date -u +%F)/latest.csv"
           if [ -f "${CSV}" ]; then
-            echo "📤 Uploading to HF (daily folder)..."
+            echo "📤 Uploading scraped CSV -> Hugging Face"
             export LOCAL_CSV="${CSV}"
             python upload_to_hf.py
+          elif [ -f "${ALT}" ]; then
+            echo "📤 Uploading alternate CSV -> Hugging Face"
+            export LOCAL_CSV="${ALT}"
+            python upload_to_hf.py
           else
-            echo "⚠️ No CSV found, skipping upload."
+            echo "⚠️ No CSV found in /tmp/data — skipping upload."
           fi
 
-      # === BUILD ===
-      - name: 🧱 Merge tweets + BTC data
+      # === BUILD DATASET ===
+      - name: 🧱 Merge new tweets with BTC data
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🔄 Building merged dataset..."
+          echo "🔄 Building merged Pegos dataset..."
           python build_dataset_hf.py || echo "⚠️ build_dataset_hf.py failed — continuing"
-          echo "✅ Merged dataset uploaded to HF."
+          echo "✅ Merged dataset uploaded."
 
-      # === CLEAN ===
-      - name: 🧹 Clean merged dataset
+      # === CLEAN DATASET ===
+      - name: 🧹 Clean merged dataset (remove zero-engagement)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🧽 Cleaning dataset..."
+          echo "🧽 Cleaning Pegos dataset..."
           python clean_dataset_hf.py || echo "⚠️ clean_dataset_hf.py failed — continuing"
           echo "✅ Cleaned dataset uploaded."
 
-      # === PREDICT ===
-      - name: 🤖 Run Pegos Hybrid Prediction
+      # === PREDICT (only latest batch) ===
+      - name: 🤖 Run Pegos Hybrid Prediction (latest only)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🧠 Running Pegos hybrid prediction pipeline..."
+          echo "🧠 Running Pegos prediction (latest.csv only)..."
           python predict_with_model.py || echo "⚠️ predict_with_model.py failed — continuing"
-          echo "✅ Hybrid predictions completed and uploaded."
+          echo "✅ Prediction complete."
 
       # === VALIDASYON ===
       - name: 📜 List HF dataset files
@@ -143,23 +146,26 @@ jobs:
           from huggingface_hub import HfApi
           api = HfApi(token=os.getenv("HF_TOKEN"))
           repo = os.getenv("HF_DATASET_REPO")
-          print("📂 Listing files in", repo)
+          print("📂 Hugging Face Repo İçeriği:")
           for f in api.list_repo_files(repo_id=repo, repo_type="dataset"):
               print(" -", f)
           PY
 
-      # === DEBUG ÇIKTILARI ===
+      # === DEBUG VE RAPORLAMA ===
       - name: 🗂️ Show workspace & temp data
         if: always()
         run: |
           echo "📁 Workspace contents:"
           ls -lah
           echo
-          echo "📅 Daily data folders:"
+          echo "📦 /tmp/data içeriği:"
           ls -lah /tmp/data || true
+          echo
+          echo "📦 /tmp/data alt klasörleri:"
+          find /tmp/data -type f || true
 
       - name: 🪶 Show notebook summary
         if: always()
         run: |
-          echo "📜 Notebook Output (short):"
+          echo "📜 Notebook Output (summary):"
           head -n 200 output.ipynb | sed 's/\\n/\n/g' | grep -E "✅|⚠️|❌|tweet|Upload|Total" || true
