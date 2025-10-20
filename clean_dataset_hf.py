@@ -13,7 +13,7 @@ print("🧽 Dataset temizleniyor...")
 # 1️⃣ Veri oku
 p = hf_hub_download(
     repo_id=HF_DATASET_REPO,
-    filename="data/pegos_final_dataset.csv",
+    filename="data/daily_raw.csv",
     repo_type="dataset",
     token=HF_TOKEN,
 )
