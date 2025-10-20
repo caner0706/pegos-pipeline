@@ -19,7 +19,7 @@ print("🤖 Pegos Prediction (tüm sütunlu detaylı çıktı) başlatıldı")
 # === 1️⃣ Yeni batch verisini indir (latest.csv) ===
 p = hf_hub_download(
     repo_id=HF_DATASET_REPO,
-    filename="data/latest.csv",
+    filename="data/cleaned.csv",
     repo_type="dataset",
     token=HF_TOKEN,
 )
