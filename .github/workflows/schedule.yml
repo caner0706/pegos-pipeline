@@ -44,7 +44,7 @@ jobs:
           set -e
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install jupyter  # notebook çalıştırma garantisi
+          pip install jupyter
 
       # === DEBUG VE TOKEN KONTROLÜ ===
       - name: 🧩 Debug environment & Hugging Face token
@@ -80,7 +80,7 @@ jobs:
           jupyter nbconvert --to notebook --execute data.ipynb --output output.ipynb --ExecutePreprocessor.timeout=1800
           echo "✅ Scraper notebook executed successfully"
 
-      # === UPLOAD (flat structure) ===
+      # === UPLOAD ===
       - name: ☁️ Upload scraped data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -112,25 +112,31 @@ jobs:
           python build_dataset_hf.py || echo "⚠️ build_dataset_hf.py failed — continuing"
           echo "✅ Merged dataset uploaded."
 
-      # === CLEAN DATASET ===
-      - name: 🧹 Clean merged dataset (remove zero-engagement)
+      # 🆕 DAILY RAW CHECK
+      - name: 🧾 Verify daily_raw.csv created
+        run: |
+          echo "📄 Checking daily_raw.csv existence:"
+          ls -lah /tmp/data/daily_raw.csv || echo "⚠️ daily_raw.csv not found"
+
+      # === CLEAN DATASET (DAILY RAW) ===
+      - name: 🧹 Clean latest dataset (remove zero-engagement)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🧽 Cleaning Pegos dataset..."
+          echo "🧽 Cleaning latest daily dataset..."
           python clean_dataset_hf.py || echo "⚠️ clean_dataset_hf.py failed — continuing"
           echo "✅ Cleaned dataset uploaded."
 
-      # === PREDICT (only latest batch) ===
-      - name: 🤖 Run Pegos Hybrid Prediction (latest only)
+      # === PREDICT (LATEST ONLY) ===
+      - name: 🤖 Run Pegos Hybrid Prediction (cleaned only)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           set -e
-          echo "🧠 Running Pegos prediction (latest.csv only)..."
+          echo "🧠 Running Pegos prediction (cleaned.csv only)..."
           python predict_with_model.py || echo "⚠️ predict_with_model.py failed — continuing"
           echo "✅ Prediction complete."
 
@@ -151,7 +157,7 @@ jobs:
               print(" -", f)
           PY
 
-      # === DEBUG VE RAPORLAMA ===
+      # === DEBUG & RAPOR ===
       - name: 🗂️ Show workspace & temp data
         if: always()
         run: |
