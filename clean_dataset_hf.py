@@ -29,7 +29,7 @@ for c in ["comment", "retweet", "like", "see_count"]:
 
 # 3️⃣ Temizlik (sadece 0,0,0 olan satırları kaldır)
 before = len(df)
-df = df[~((df["comment"] == 0) & (df["retweet"] == 0) & (df["like"] == 0)]
+df = df[~((df["comment"] == 0) & (df["retweet"] == 0) & (df["like"] == 0))]
 after = len(df)
 print(f"🧹 {before - after} satır sıfır etkileşimli olarak temizlendi. ({after} satır kaldı)")
 
