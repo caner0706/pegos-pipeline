@@ -1,5 +1,5 @@
 # =====================================================
-# Pegos Prediction (only latest batch, with prediction_day)
+# Pegos Prediction (only latest batch, with prediction_day + AI_Model_Tahmini)
 # =====================================================
 import os
 import joblib
@@ -31,8 +31,8 @@ if df.empty:
     exit()
 
 # === Model dosyaları ===
-clf = joblib.load("pegos_lightgbm.pkl")
-reg = joblib.load("pegos_regressor.pkl")
+clf = joblib.load("pegos_lightgbm.pkl")   # sınıflandırıcı (yön)
+reg = joblib.load("pegos_regressor.pkl")  # regresyon (değer farkı)
 scaler = joblib.load("scaler.pkl")
 
 # === BERT modeli (Türkçe) ===
@@ -41,19 +41,21 @@ bert = AutoModel.from_pretrained("dbmdz/bert-base-turkish-cased")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 bert.to(device).eval()
 
-# === Sayısal veriler (eksikleri doldur) ===
+# === Sayısal veriler ===
 for c in ["comment", "retweet", "like", "see_count"]:
     if c not in df.columns:
         df[c] = 0
 X_num = scaler.transform(df[["comment", "retweet", "like", "see_count"]].fillna(0))
 
-# === Metin embedding fonksiyonu ===
+# === Metin embedding ===
 def embed(texts, bs=16):
     embs = []
     with torch.no_grad():
         for i in range(0, len(texts), bs):
             batch = [str(t) for t in texts[i:i+bs]]
-            tks = tok(batch, padding=True, truncation=True, max_length=128, return_tensors="pt").to(device)
+            tks = tok(
+                batch, padding=True, truncation=True, max_length=128, return_tensors="pt"
+            ).to(device)
             out = bert(**tks).last_hidden_state[:, 0, :].cpu().numpy()
             embs.append(out)
     return np.vstack(embs)
@@ -61,14 +63,29 @@ def embed(texts, bs=16):
 X_text = embed(df["tweet"].tolist())
 X = np.hstack([X_text, X_num])
 
-# === Tahminler ===
+# === Model Tahminleri ===
 df["pred_label"] = clf.predict(X)
 df["pred_proba"] = clf.predict_proba(X)[:, 1]
 df["pred_diff"] = reg.predict(X)
+
+# === Modelin öngördüğü değişim oranı (%)
+df["AI_Model_Tahmini (%)"] = (df["pred_diff"] * 100).round(2)
+
+# === Yön etiketi ===
+df["AI_Model_Yonu"] = np.where(
+    df["pred_diff"] > 0,
+    "📈 Artış Bekleniyor",
+    np.where(df["pred_diff"] < 0, "📉 Düşüş Bekleniyor", "⚖️ Değişim Yok"),
+)
+
+# === Kategorik tahmin etiketi (sınıflandırıcı) ===
 df["Tahmin"] = df["pred_label"].map({1: "📈 YÜKSELİŞ", 0: "📉 DÜŞÜŞ"})
 
-# === İşlem günü bilgisi (UTC) ===
+# === İşlem günü (UTC) ===
 df["prediction_day"] = datetime.utcnow().strftime("%Y-%m-%d")
+
+# === Gereksiz / eksik alanları temizle ===
+df = df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
 # === Kaydet ve Hugging Face’e yükle ===
 os.makedirs("/tmp/data", exist_ok=True)
@@ -85,3 +102,4 @@ upload_file(
 
 print("🚀 predict.csv (sadece yeni veriler) Hugging Face’e yüklendi.")
 print(f"📅 prediction_day eklendi: {df['prediction_day'].iloc[0]}")
+print(f"📊 Ortalama model tahmini: {df['AI_Model_Tahmini (%)'].mean():.2f}%")
