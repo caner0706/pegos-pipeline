@@ -2,7 +2,7 @@ name: Pegos Live Data Fetch & Predict
 
 on:
   schedule:
-    - cron: "0 */4 * * *"   # Her 4 saatte bir (UTC)
+    - cron: "45 20/4 * * *"   # Her 4 saatte bir (UTC)
   workflow_dispatch:
 
 jobs:
